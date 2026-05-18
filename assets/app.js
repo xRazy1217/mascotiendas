@@ -500,7 +500,7 @@ function app() {
         + despachoMsg
       );
 
-      window.open(`https://wa.me/56974851872?text=${msg}`, '_blank');
+      window.open(`https://wa.me/56953793135?text=${msg}`, '_blank');
 
       // Limpiar carrito
       this.cart = []; this.saveCart();
