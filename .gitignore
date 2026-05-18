@@ -1,0 +1,15 @@
+# Credenciales
+config/db.php
+
+# Uploads
+uploads/
+
+# Logs
+logs/
+
+# Archivos innecesarios
+*.zip
+*.gz
+mascotiendas/
+api/php_errorlog
+fetchColumn()
