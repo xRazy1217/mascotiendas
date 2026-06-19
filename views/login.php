@@ -20,7 +20,7 @@
     </form>
     <p class="text-center mt-4 text-sm font-bold text-slate-400">
       ¿No tienes cuenta?
-      <button @click="page='registro'" class="text-mt-orange hover:underline ml-1">Regístrate</button>
+      <button @click="page='registro'" class="text-mt-brown hover:text-mt-orange font-black hover:underline ml-1">Regístrate</button>
     </p>
   </div>
 </div>

@@ -60,4 +60,4 @@ SELECT id, v FROM atributos, (
 ) vals WHERE atributos.nombre = 'Especie';
 
 -- Columna para marcar si producto tiene variantes
-ALTER TABLE productos ADD COLUMN IF NOT EXISTS tiene_variantes TINYINT(1) NOT NULL DEFAULT 0;
+ALTER TABLE productos ADD COLUMN tiene_variantes TINYINT(1) NOT NULL DEFAULT 0;

@@ -1,9 +1,6 @@
 <?php
 require_once __DIR__ . '/../includes/funciones.php';
-
-session_name('mascotiendas');
-ini_set('session.cookie_path', '/');
-session_start();
+checkCSRF();
 $pdo    = getPDO();
 $action = $_POST['action'] ?? $_GET['action'] ?? '';
 
@@ -30,6 +27,7 @@ function login(PDO $pdo): void {
         jsonResponse(['error' => 'Credenciales incorrectas'], 401);
     }
 
+    session_regenerate_id(true);
     $_SESSION['usuario_id'] = $user['id'];
     $_SESSION['rol']        = $user['rol'];
     $_SESSION['nombre']     = $user['nombre'];
@@ -57,6 +55,7 @@ function registro(PDO $pdo): void {
     $stmt->execute([$nombre, $apellido, $email, $hash, $tel]);
 
     $id = (int)$pdo->lastInsertId();
+    session_regenerate_id(true);
     $_SESSION['usuario_id'] = $id;
     $_SESSION['rol']        = 'cliente';
     $_SESSION['nombre']     = $nombre;
@@ -65,6 +64,7 @@ function registro(PDO $pdo): void {
 }
 
 function logout(): void {
+    $_SESSION = [];
     session_destroy();
     jsonResponse(['ok' => true]);
 }

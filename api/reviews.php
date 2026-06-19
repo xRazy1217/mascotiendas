@@ -1,8 +1,6 @@
 <?php
 require_once __DIR__ . '/../includes/funciones.php';
-session_name('mascotiendas');
-ini_set('session.cookie_path', '/');
-session_start();
+checkCSRF();
 
 $pdo    = getPDO();
 $action = $_POST['action'] ?? $_GET['action'] ?? '';
@@ -20,6 +18,10 @@ function crearReview(PDO $pdo): void {
     $estrellas = max(1, min(5, (int)($_POST['estrellas'] ?? 5)));
     $comentario = sanitize($_POST['comentario'] ?? '');
     $uid       = $_SESSION['usuario_id'] ?? null;
+
+    // Hardening: Limitar longitud de texto para evitar abusos de tamaño en base de datos
+    $nombre = substr($nombre, 0, 100);
+    $comentario = substr($comentario, 0, 1000);
 
     if (!$pid || !$nombre || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
         jsonResponse(['error' => 'Datos incompletos'], 400);

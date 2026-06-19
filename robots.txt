@@ -1,0 +1,19 @@
+User-agent: *
+Allow: /
+
+Disallow: /admin/
+Disallow: /api/
+Disallow: /config/
+Disallow: /includes/
+Disallow: /tests/
+Disallow: /scratch/
+Disallow: /assets/js/admin/
+
+# Parámetros de sesión y filtros
+Disallow: /*?action=
+Disallow: /*&action=
+
+# Feeds
+Allow: /feed/google-shopping.xml
+
+Sitemap: https://mascotiendas.cl/sitemap.xml

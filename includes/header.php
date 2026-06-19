@@ -6,15 +6,6 @@
            alt="Mascotiendas" class="h-14 w-auto object-contain">
     </div>
 
-    <div class="flex items-center bg-mt-cream px-3 py-1.5 rounded-xl border border-mt-brown/10">
-      <i class="fas fa-map-marker-alt text-mt-orange mr-2 text-xs"></i>
-      <select x-model="sucursal" class="bg-transparent font-bold text-mt-brown text-xs focus:outline-none cursor-pointer">
-        <option value="Balmaceda">Balmaceda 4521, La Serena</option>
-        <option value="Geronimo">Gerónimo Méndez, Coquimbo</option>
-        <option value="Alessandri">Alessandri 147, El Llano</option>
-      </select>
-    </div>
-
     <div class="flex items-center gap-4">
       <button @click="page='home'" class="text-[10px] font-black text-mt-brown uppercase tracking-widest hover:text-mt-orange transition-colors hidden md:block">Inicio</button>
       <button @click="page='tienda';cargarProductos()" class="text-[10px] font-black text-mt-brown uppercase tracking-widest hover:text-mt-orange transition-colors hidden md:block">Tienda</button>
@@ -23,7 +14,7 @@
       <button @click="page='blog';cargarBlog()" class="text-[10px] font-black text-mt-brown uppercase tracking-widest hover:text-mt-orange transition-colors hidden md:block">Blog</button>
 
       <div class="relative" x-data="{open:false}">
-        <button @click="open=!open" class="text-mt-brown hover:text-mt-orange transition-colors">
+        <button @click="open=!open" aria-label="Menú de usuario" class="text-mt-brown hover:text-mt-orange transition-colors">
           <i class="fas fa-user text-lg"></i>
         </button>
         <div x-show="open" x-cloak @click.outside="open=false"
@@ -39,7 +30,7 @@
               <p class="px-4 py-2 text-xs text-slate-400 font-bold truncate" x-text="'Hola, '+usuario.nombre"></p>
               <button @click="open=false;page='perfil'" class="w-full text-left px-4 py-2 text-sm font-bold text-mt-brown hover:bg-mt-cream rounded-xl">Mi cuenta</button>
               <template x-if="usuario.rol==='admin'">
-                <a href="/mascotiendas/admin/" class="block px-4 py-2 text-sm font-bold text-mt-orange hover:bg-mt-cream rounded-xl">Panel Admin</a>
+                <a href="<?= $base_path ?>/admin/" class="block px-4 py-2 text-sm font-bold text-mt-orange hover:bg-mt-cream rounded-xl">Panel Admin</a>
               </template>
               <button @click="logout();open=false" class="w-full text-left px-4 py-2 text-sm font-bold text-red-500 hover:bg-red-50 rounded-xl">Cerrar sesión</button>
             </div>
@@ -47,11 +38,11 @@
         </div>
       </div>
 
-      <button @click="page='favoritos'" class="text-mt-brown hover:text-mt-orange transition-colors hidden md:block">
+      <button @click="page='favoritos'" aria-label="Ver favoritos" class="text-mt-brown hover:text-mt-orange transition-colors hidden md:block">
         <i class="fas fa-heart text-lg"></i>
       </button>
 
-      <button @click="page='carrito'" class="relative text-mt-brown hover:text-mt-orange transition-colors">
+      <button @click="page='carrito'" aria-label="Ver carrito" class="relative text-mt-brown hover:text-mt-orange transition-colors">
         <i class="fas fa-shopping-basket text-xl"></i>
         <span x-show="cartCount>0" x-text="cartCount"
               class="absolute -top-2 -right-2 bg-mt-orange text-white text-[10px] font-black rounded-full h-4 w-4 flex items-center justify-center"></span>

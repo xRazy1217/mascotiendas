@@ -38,6 +38,12 @@
     <table class="w-full text-sm">
       <thead class="bg-mt-cream">
         <tr>
+          <th class="text-center px-4 py-3 w-12">
+            <input type="checkbox" 
+                   @change="selectAllProducts($event)" 
+                   :checked="selectedProducts.length === listaProductos.length && listaProductos.length > 0"
+                   class="w-4 h-4 accent-mt-orange rounded cursor-pointer">
+          </th>
           <th class="text-left px-4 py-3 font-black text-mt-brown text-xs uppercase">Producto</th>
           <th class="text-left px-4 py-3 font-black text-mt-brown text-xs uppercase hidden md:table-cell">Precio</th>
           <th class="text-left px-4 py-3 font-black text-mt-brown text-xs uppercase hidden md:table-cell">Stock</th>
@@ -47,9 +53,15 @@
       <tbody>
         <template x-for="p in listaProductos" :key="p.id">
           <tr class="border-t border-mt-cream hover:bg-slate-50 transition-colors">
+            <td class="text-center px-4 py-3 w-12">
+              <input type="checkbox" 
+                     :checked="selectedProducts.includes(p.id)" 
+                     @change="toggleProductSelection(p.id)"
+                     class="w-4 h-4 accent-mt-orange rounded cursor-pointer">
+            </td>
             <td class="px-4 py-3">
               <div class="flex items-center gap-3">
-                <img :src="p.imagen||'/mascotiendas/assets/no-image.png'" class="w-10 h-10 object-cover rounded-lg flex-shrink-0">
+                <img :src="getProductImage(p.imagen)" class="w-10 h-10 object-cover rounded-lg flex-shrink-0">
                 <div>
                   <p class="font-bold text-mt-brown line-clamp-1" x-text="p.nombre"></p>
                   <p class="text-xs text-slate-400" x-text="'ID: '+p.id"></p>
@@ -128,16 +140,47 @@
             </label>
           </div>
 
+          <!-- Categorías -->
+          <div class="border border-mt-cream rounded-xl p-4 bg-slate-50/50">
+            <p class="font-black text-mt-brown text-sm mb-2">Categorías de este producto</p>
+            <div class="grid grid-cols-2 gap-2 max-h-[140px] overflow-y-auto pr-1">
+              <template x-for="cat in listaCategorias" :key="cat.id">
+                <label class="flex items-center gap-2 font-bold text-xs cursor-pointer hover:bg-slate-100 p-1 rounded-lg">
+                  <input type="checkbox" :value="cat.id" 
+                         :checked="formProducto.categorias && formProducto.categorias.includes(parseInt(cat.id))"
+                         @change="
+                           if ($event.target.checked) {
+                             if (!formProducto.categorias) formProducto.categorias = [];
+                             formProducto.categorias.push(parseInt(cat.id));
+                           } else {
+                             formProducto.categorias = formProducto.categorias.filter(id => id != cat.id);
+                           }
+                         "
+                         class="w-4 h-4 accent-mt-orange rounded cursor-pointer">
+                  <span x-text="cat.nombre" class="text-mt-brown"></span>
+                </label>
+              </template>
+            </div>
+            <p x-show="!listaCategorias.length" class="text-xs text-slate-400 italic text-center py-2">
+              Sin categorías. Cárgalas desde la sección de Categorías.
+            </p>
+          </div>
+
           <!-- Imágenes -->
           <div x-show="formProducto.id">
             <p class="font-black text-mt-brown text-sm mb-2">Imágenes</p>
             <div class="flex flex-wrap gap-2 mb-3">
               <template x-for="img in formProducto.imagenes||[]" :key="img.id">
-                <div class="relative">
-                  <img :src="img.url" class="w-20 h-20 object-cover rounded-xl border-2 border-mt-cream">
+                <div class="relative group">
+                  <img :src="getProductImage(img.url)" class="w-20 h-20 object-cover rounded-xl border-2 border-mt-cream shadow-sm">
                   <button @click="eliminarImagen(img.id)"
-                          class="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white rounded-full text-xs flex items-center justify-center hover:bg-red-600">
+                          class="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white rounded-full text-xs flex items-center justify-center hover:bg-red-600 transition-colors">
                     <i class="fas fa-times"></i>
+                  </button>
+                  <button @click="abrirModalRecorte(img)"
+                          class="absolute -bottom-1 -right-1 w-6 h-6 bg-mt-orange text-white rounded-full text-xs flex items-center justify-center hover:bg-orange-600 shadow-sm transition-colors"
+                          title="Ajustar recorte y zoom">
+                    <i class="fas fa-crop-alt"></i>
                   </button>
                 </div>
               </template>
@@ -249,6 +292,118 @@
           <button @click="formVariante=null"
                   class="px-6 py-3 bg-mt-cream text-mt-brown rounded-2xl font-black hover:bg-slate-200 transition-colors">
             Cancelar
+          </button>
+        </div>
+      </div>
+    </template>
+  </div>
+</div>
+
+<!-- Modal de Recorte de Imagen -->
+<div x-show="modalRecorte" x-cloak @click.self="modalRecorte=null"
+     class="fixed inset-0 bg-black/60 z-[70] flex items-center justify-center p-4 backdrop-blur-sm">
+  <div class="bg-white rounded-[2rem] w-full max-w-xl shadow-2xl p-6 flex flex-col max-h-[90vh]">
+    <div class="flex justify-between items-center mb-4">
+      <h3 class="text-lg font-black text-mt-brown uppercase">Ajustar Recorte e Imagen</h3>
+      <button @click="modalRecorte=null" class="text-slate-400 hover:text-slate-600"><i class="fas fa-times text-xl"></i></button>
+    </div>
+    
+    <template x-if="modalRecorte && recorteConfig">
+      <div class="space-y-4 flex-grow overflow-y-auto pr-1">
+        <!-- Tabs de Visualización -->
+        <div class="flex border-b border-mt-cream">
+          <button @click="recorteTab='catalogo'"
+                  :class="recorteTab==='catalogo'?'border-mt-orange text-mt-orange font-black border-b-2':'text-slate-400 font-bold border-b border-transparent'"
+                  class="flex-1 py-2 text-center text-xs uppercase tracking-wider">
+            Catálogo
+          </button>
+          <button @click="recorteTab='detalle'"
+                  :class="recorteTab==='detalle'?'border-mt-orange text-mt-orange font-black border-b-2':'text-slate-400 font-bold border-b border-transparent'"
+                  class="flex-1 py-2 text-center text-xs uppercase tracking-wider">
+            Detalle
+          </button>
+          <button @click="recorteTab='miniatura'"
+                  :class="recorteTab==='miniatura'?'border-mt-orange text-mt-orange font-black border-b-2':'text-slate-400 font-bold border-b border-transparent'"
+                  class="flex-1 py-2 text-center text-xs uppercase tracking-wider">
+            Miniatura
+          </button>
+        </div>
+        
+        <!-- Contenedor de Previsualización Centrado -->
+        <div class="bg-slate-50 rounded-2xl p-6 flex items-center justify-center min-h-[280px]">
+          <!-- Caja de la Vista dependiente de la pestaña activa -->
+          <div :class="{
+                 'w-64 h-48 rounded-2xl': recorteTab==='catalogo',
+                 'w-64 h-64 rounded-3xl': recorteTab==='detalle',
+                 'w-16 h-16 rounded-xl': recorteTab==='miniatura'
+               }"
+               class="bg-mt-cream border-2 border-dashed border-slate-300 relative overflow-hidden transition-all duration-300 shadow-inner flex items-center justify-center">
+            
+            <img :src="getProductImage(modalRecorte.url)"
+                 class="absolute w-full h-full transition-transform duration-100"
+                 :style="obtenerEstiloPrevisualizacion()">
+          </div>
+        </div>
+        
+        <!-- Controles -->
+        <div class="space-y-3 p-1">
+          <!-- Modo de Ajuste (object-fit) -->
+          <div>
+            <span class="block text-xs font-black text-mt-brown uppercase tracking-wider mb-2">Modo de ajuste</span>
+            <div class="flex gap-2">
+              <button @click="recorteConfig[recorteTab].fit='cover'"
+                      :class="recorteConfig[recorteTab].fit==='cover'?'bg-mt-orange text-white':'bg-mt-cream text-mt-brown hover:bg-slate-200'"
+                      class="flex-1 py-2 rounded-xl font-bold text-xs uppercase tracking-wide transition-colors">
+                Recortar para llenar (Cover)
+              </button>
+              <button @click="recorteConfig[recorteTab].fit='contain'"
+                      :class="recorteConfig[recorteTab].fit==='contain'?'bg-mt-orange text-white':'bg-mt-cream text-mt-brown hover:bg-slate-200'"
+                      class="flex-1 py-2 rounded-xl font-bold text-xs uppercase tracking-wide transition-colors">
+                Ver completa (Contain)
+              </button>
+            </div>
+          </div>
+          
+          <!-- Zoom/Escala (scale) -->
+          <div>
+            <div class="flex justify-between text-xs font-bold text-slate-500 mb-1">
+              <span>Zoom / Escala</span>
+              <span class="font-black text-mt-orange" x-text="recorteConfig[recorteTab].zoom + '%'"></span>
+            </div>
+            <input type="range" min="50" max="300" step="5" x-model.number="recorteConfig[recorteTab].zoom"
+                   class="w-full accent-mt-orange cursor-pointer">
+          </div>
+          
+          <!-- Posición Horizontal X -->
+          <div>
+            <div class="flex justify-between text-xs font-bold text-slate-500 mb-1">
+              <span>Posición Horizontal (X)</span>
+              <span class="font-black text-mt-orange" x-text="recorteConfig[recorteTab].x + '%'"></span>
+            </div>
+            <input type="range" min="0" max="100" step="1" x-model.number="recorteConfig[recorteTab].x"
+                   class="w-full accent-mt-orange cursor-pointer">
+          </div>
+          
+          <!-- Posición Vertical Y -->
+          <div>
+            <div class="flex justify-between text-xs font-bold text-slate-500 mb-1">
+              <span>Posición Vertical (Y)</span>
+              <span class="font-black text-mt-orange" x-text="recorteConfig[recorteTab].y + '%'"></span>
+            </div>
+            <input type="range" min="0" max="100" step="1" x-model.number="recorteConfig[recorteTab].y"
+                   class="w-full accent-mt-orange cursor-pointer">
+          </div>
+        </div>
+        
+        <!-- Acciones del Modal -->
+        <div class="flex gap-3 pt-3">
+          <button @click="guardarRecorte()"
+                  class="flex-grow bg-mt-orange text-white py-3 rounded-2xl font-black uppercase hover:bg-orange-500 transition-colors text-sm shadow-md">
+            Guardar Ajustes
+          </button>
+          <button @click="restablecerRecorte()"
+                  class="px-5 py-3 bg-slate-100 text-slate-600 rounded-2xl font-bold hover:bg-slate-200 transition-colors text-sm">
+            Restablecer
           </button>
         </div>
       </div>

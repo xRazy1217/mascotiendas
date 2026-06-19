@@ -8,8 +8,11 @@ uploads/
 logs/
 
 # Archivos innecesarios
+node_modules/
+scratch/
 *.zip
 *.gz
 mascotiendas/
 api/php_errorlog
 fetchColumn()
+

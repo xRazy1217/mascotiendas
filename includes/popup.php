@@ -45,7 +45,7 @@
           </button>
           <div class="text-5xl mb-2">🐾</div>
           <h3 class="text-2xl font-black text-white uppercase italic" x-text="config.popup_titulo||'¡Espera!'"></h3>
-          <p class="text-mt-orange font-black text-lg">10% de descuento</p>
+          <p class="text-mt-orange font-black text-lg" x-text="config.popup_descuento_valor || '10% de descuento'"></p>
           <p class="text-white/70 text-sm mt-1">en tu primera compra</p>
         </div>
         <div class="p-6 text-center">

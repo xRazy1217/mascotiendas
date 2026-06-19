@@ -109,7 +109,7 @@
       <div x-show="!perfil?.direcciones?.length" class="text-center py-10 text-slate-400">
         <i class="fas fa-map-marker-alt text-4xl mb-3 opacity-30"></i>
         <p class="font-bold italic text-sm">No tienes direcciones guardadas</p>
-        <button @click="abrirFormDireccion(null)" class="mt-3 text-mt-orange font-black text-sm hover:underline">
+        <button @click="abrirFormDireccion(null)" class="mt-3 text-mt-brown hover:text-mt-orange font-black text-sm hover:underline">
           Agregar dirección →
         </button>
       </div>
@@ -173,7 +173,7 @@
       <div class="text-center py-10 text-slate-400">
         <i class="fas fa-box-open text-4xl mb-3 opacity-30"></i>
         <p class="font-bold italic">Aún no tienes pedidos</p>
-        <button @click="page='tienda';cargarProductos()" class="mt-3 text-mt-orange font-black text-sm hover:underline">
+        <button @click="page='tienda';cargarProductos()" class="mt-3 text-mt-brown hover:text-mt-orange font-black text-sm hover:underline">
           Ir a la tienda →
         </button>
       </div>
@@ -197,7 +197,7 @@
                       'bg-red-100 text-red-700':      p.estado==='cancelado'
                     }"
                     x-text="p.estado"></span>
-              <p class="font-black text-mt-orange" x-text="formatPrecio(p.total)"></p>
+              <p class="font-black text-mt-brown" x-text="formatPrecio(p.total)"></p>
               <i class="fas fa-chevron-right text-slate-300 text-xs"></i>
             </div>
           </div>
@@ -229,17 +229,17 @@
             <div class="space-y-2 mb-4">
               <template x-for="item in pedidoClienteDetalle.items" :key="item.id">
                 <div class="flex items-center gap-3 p-3 bg-slate-50 rounded-xl">
-                  <img :src="item.imagen_url||'/mascotiendas/assets/no-image.png'"
+                  <img :src="getProductImage(item.imagen_url)"
                        class="w-10 h-10 object-cover rounded-lg flex-shrink-0">
                   <p class="flex-grow font-bold text-mt-brown text-sm line-clamp-1" x-text="item.nombre"></p>
                   <span class="text-xs text-slate-400 font-bold" x-text="'x'+item.cantidad"></span>
-                  <span class="font-black text-mt-orange text-sm" x-text="formatPrecio(item.precio*item.cantidad)"></span>
+                  <span class="font-black text-mt-brown text-sm" x-text="formatPrecio(item.precio*item.cantidad)"></span>
                 </div>
               </template>
             </div>
             <div class="flex justify-between font-black text-mt-brown p-4 bg-mt-cream rounded-xl mb-3">
               <span>Total</span>
-              <span class="text-mt-orange" x-text="formatPrecio(pedidoClienteDetalle.total)"></span>
+              <span class="text-mt-brown" x-text="formatPrecio(pedidoClienteDetalle.total)"></span>
             </div>
             <div class="text-xs text-slate-500 space-y-1">
               <p x-show="pedidoClienteDetalle.direccion">

@@ -1,0 +1,557 @@
+import pkg from 'whatsapp-web.js';
+const { Client, LocalAuth } = pkg;
+import qrcode from 'qrcode-terminal';
+import dotenv from 'dotenv';
+import { runAgent, transcribeAudio } from './agent.js';
+import { orderEvents } from './events.js';
+import pool from './db.js';
+
+dotenv.config();
+
+let landingBypassInterval = null;
+
+// Helper para obtener el JID del administrador desde la base de datos
+async function getAdminJid() {
+  try {
+    const [rows] = await pool.execute("SELECT valor FROM configuraciones WHERE clave = 'admin_whatsapp_number'");
+    if (rows.length > 0 && rows[0].valor) {
+      const cleanNum = rows[0].valor.replace(/\D/g, '');
+      if (cleanNum) return `${cleanNum}@c.us`;
+    }
+  } catch (err) {
+    console.error('Error al consultar admin_whatsapp_number en DB:', err);
+  }
+  return '56920571475@c.us'; // Fallback por defecto
+}
+
+// Helper para obtener el número del bot formateado para responder en errores
+async function getBotPhoneFormatted() {
+  try {
+    const [rows] = await pool.execute("SELECT valor FROM configuraciones WHERE clave = 'bot_whatsapp_number'");
+    if (rows.length > 0 && rows[0].valor) {
+      const cleanNum = rows[0].valor.replace(/\D/g, '');
+      if (cleanNum) {
+        if (cleanNum.startsWith('569') && cleanNum.length === 11) {
+          return `+56 9 ${cleanNum.slice(3, 7)} ${cleanNum.slice(7)}`;
+        }
+        return `+${cleanNum}`;
+      }
+    }
+  } catch (err) {
+    console.error('Error al consultar bot_whatsapp_number en DB:', err);
+  }
+  return '+56 9 5379 3135'; // Fallback por defecto
+}
+
+// Helper para saber si el bot debe responder únicamente a contactos no guardados en la agenda
+async function getOnlyRespondToUnknown() {
+  try {
+    const [rows] = await pool.execute("SELECT valor FROM configuraciones WHERE clave = 'bot_only_respond_to_unknown'");
+    if (rows.length > 0) {
+      return rows[0].valor === '1';
+    }
+  } catch (err) {
+    console.error('Error al consultar bot_only_respond_to_unknown en DB:', err);
+  }
+  return true; // Fallback seguro para evitar spam a contactos personales si hay error
+}
+
+
+// Mapa en memoria para almacenar el historial de chats de cada contacto
+// Clave: chatId (remitente), Valor: Array de mensajes en formato de Gemini [{ role, parts }]
+const chatHistories = new Map();
+
+// Mapa en memoria para controlar la velocidad de respuestas y evitar bucles eternos de bots
+// Clave: chatId, Valor: { timestamps: Array<number>, isPaused: boolean, pausedUntil: number }
+const rateLimits = new Map();
+
+// Límite de mensajes guardados en el historial para evitar saturar el contexto de la IA
+const MAX_HISTORY_LENGTH = 20;
+
+// Registrar la hora de encendido (en segundos UNIX) para ignorar mensajes antiguos en lote
+const startupTime = Math.floor(Date.now() / 1000);
+
+console.log('🤖 Iniciando Mascotiendas Bot...');
+
+// Configurar cliente de WhatsApp con persistencia de sesión local y uso del ejecutable local de Chrome
+const client = new Client({
+  authStrategy: new LocalAuth({
+    dataPath: './.wwebjs_auth' // Guarda las credenciales de sesión en esta carpeta
+  }),
+  puppeteer: {
+    // Chrome 148 del sistema — mismo que creó el perfil de sesión en .wwebjs_auth
+    executablePath: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+    headless: true,
+    timeout: 0,
+    protocolTimeout: 120000,
+    args: [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-accelerated-2d-canvas',
+      '--no-first-run',
+      '--no-zygote',
+      '--disable-gpu',
+      '--disable-extensions',
+      '--disable-background-networking',
+      '--disable-sync',
+      '--disable-translate',
+      '--hide-scrollbars',
+      '--metrics-recording-only',
+      '--mute-audio',
+      '--safebrowsing-disable-auto-update',
+      '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36'
+    ]
+  }
+});
+
+// Mostrar progreso de carga
+client.on('loading_screen', (percent, message) => {
+  console.log(`⏳ Cargando WhatsApp Web: ${percent}% | Detalle: ${message}`);
+});
+
+// Evento cuando se autentica con éxito
+client.on('authenticated', () => {
+  console.log('🔑 Autenticación exitosa en WhatsApp.');
+});
+
+// Evento si falla la autenticación
+client.on('auth_failure', (msg) => {
+  console.error('❌ Error de autenticación:', msg);
+});
+
+// Mostrar código QR en la terminal para escanear
+client.on('qr', (qr) => {
+  console.log('\n📲 ESCANEA EL CÓDIGO QR CON TU WHATSAPP PARA INICIAR SESIÓN:\n');
+  qrcode.generate(qr, { small: true });
+});
+
+// Confirmación de sesión iniciada con éxito
+client.on('ready', () => {
+  console.log('\n✅ ¡Mascotiendas Bot está conectado y listo para recibir mensajes!');
+  if (landingBypassInterval) {
+    clearInterval(landingBypassInterval);
+    landingBypassInterval = null;
+    console.log('[Puppeteer] Bot listo. Intervalo de bypass de landing page detenido.');
+  }
+});
+
+// Diagnóstico de creación de mensajes
+client.on('message_create', (msg) => {
+  console.log(`[message_create] De: ${msg.from} | De Mí: ${msg.id.fromMe} | Texto: "${msg.body}"`);
+});
+
+// Escuchar mensajes entrantes
+client.on('message', async (message) => {
+  try {
+    const age = Math.floor(Date.now() / 1000) - message.timestamp;
+    // Ignorar mensajes antiguos (recibidos hace más de 10 minutos)
+    const maxAgeSeconds = 10 * 60; // 10 minutos
+    if (age > maxAgeSeconds) {
+      console.log(`[Mensaje Ignorado] De: ${message.from} | Razón: Antiguo (${age}s de antigüedad)`);
+      return;
+    }
+
+    // Ignorar mensajes que fueron enviados antes de encender el bot (mensajes acumulados offline)
+    if (message.timestamp < startupTime) {
+      console.log(`[Mensaje Ignorado] De: ${message.from} | Razón: Enviado antes del encendido del bot (${message.timestamp} < ${startupTime})`);
+      return;
+    }
+
+    const chat = await message.getChat();
+    
+    const chatId = message.from;
+    
+    // Ignorar mensajes de grupos y difusiones de estado, solo responder en chats individuales privados
+    if (chat.isGroup || chatId === 'status@broadcast' || chat.id._serialized === 'status@broadcast') {
+      console.log(`[Mensaje Ignorado] De: ${chatId} | Razón: Grupo o Difusión`);
+      return;
+    }
+
+
+    const now = Date.now();
+
+    // Control de bucles: verificar si el bot está pausado para este contacto
+    if (rateLimits.has(chatId)) {
+      const limit = rateLimits.get(chatId);
+      if (limit.isPaused) {
+        if (now < limit.pausedUntil) {
+          console.log(`[Rate Limit] Mensaje ignorado de ${chatId} (Bot pausado para evitar bucles).`);
+          return;
+        } else {
+          limit.isPaused = false;
+          limit.timestamps = [];
+          console.log(`[Rate Limit] Período de pausa finalizado para ${chatId}.`);
+        }
+      }
+    }
+    if (message.hasMedia) {
+      console.log(`[Media Recibido] Detectado archivo adjunto. Tipo: "${message.type}"`);
+    }
+
+    let messageBody = (message.body || '').trim();
+
+    // Ignorar si el mensaje está vacío y no es una nota de voz/audio transcribible
+    const isAudioMsg = message.hasMedia && (message.type === 'audio' || message.type === 'voice' || message.type === 'ptt');
+    if (!messageBody && !isAudioMsg) {
+      console.log(`[Mensaje Ignorado] De: ${chatId} | Razón: Mensaje vacío (notificación de sistema, cifrado o evento no conversacional)`);
+      return;
+    }
+
+    // Si el mensaje es una nota de voz, audio o PTT (Push to Talk), transcribirlo con Gemini
+    if (isAudioMsg) {
+      console.log(`[Audio Recibido] Descargando nota de voz de ${chatId}...`);
+      try {
+        const media = await message.downloadMedia();
+        if (media && media.data) {
+          console.log(`[Audio Recibido] Transcribiendo con Gemini...`);
+          const transcription = await transcribeAudio(media.data, media.mimetype);
+          console.log(`[Audio Recibido] Transcripción obtenida: "${transcription}"`);
+          
+          if (transcription === '[vacío]' || !transcription) {
+            console.log('[Audio Recibido] El audio está vacío o no contiene voz.');
+            await message.reply('Disculpa, no logré escuchar bien tu audio. ¿Me lo podrías escribir o enviar otro, porfa? 🐾');
+            return;
+          }
+          messageBody = transcription;
+        } else {
+          throw new Error('No se pudo descargar el archivo de audio.');
+        }
+      } catch (audioErr) {
+        console.error('❌ Error al procesar el audio:', audioErr);
+        await message.reply('Disculpa, tuve un problema al procesar tu nota de voz. ¿Podrías escribirme el mensaje, porfa? 🐾');
+        return;
+      }
+    }
+
+    console.log(`[Mensaje Recibido] De: ${message.author || message.from} | Texto: "${messageBody}"`);
+
+    // Comando especial para reiniciar la conversación
+    if (messageBody.toLowerCase() === '!reiniciar' || messageBody.toLowerCase() === '!limpiar') {
+      chatHistories.delete(chatId);
+      await message.reply('🔄 *Historial de conversación reiniciado.* ¿En qué puedo ayudarte hoy?');
+      console.log(`[Historial Reiniciado] Para el chat: ${chatId}`);
+      return;
+    }
+
+    // Inicializar historial si no existe
+    if (!chatHistories.has(chatId)) {
+      chatHistories.set(chatId, []);
+    }
+
+    const history = chatHistories.get(chatId);
+
+    // Extraer número de teléfono real del cliente
+    // WhatsApp Web puede usar @c.us (número real) o @lid (ID interno — NO es un teléfono).
+    // Estrategia: si el chatId es @c.us usamos ese número directamente.
+    // Si es @lid, intentamos obtener el número real desde contact._data o contact.id.
+    let clientPhone = '';
+    try {
+      if (chatId.endsWith('@c.us')) {
+        // Formato estándar: el número está directo en el JID
+        clientPhone = chatId.replace('@c.us', '');
+      } else {
+        // Formato LID: intentar obtener el JID alternativo (@c.us) con el número real
+        let resolvedJid = null;
+        try {
+          resolvedJid = await client.pupPage.evaluate((lid) => {
+            try {
+              const wid = window.require('WAWebWidFactory').createWid(lid);
+              const alt = window.require('WAWebApiContact').getAlternateUserWid(wid);
+              return alt ? alt.toString() : null;
+            } catch (err) {
+              return null;
+            }
+          }, chatId);
+        } catch (evalErr) {
+          console.warn('[Phone] Error al evaluar getAlternateUserWid en el navegador:', evalErr.message);
+        }
+
+        if (resolvedJid && resolvedJid.endsWith('@c.us')) {
+          clientPhone = resolvedJid.replace('@c.us', '');
+          console.log(`[Phone] Teléfono real resuelto desde JID alternativo (@lid -> @c.us): ${clientPhone}`);
+        } else {
+          // Fallback: buscar el número en los datos del contacto
+          const contact = await message.getContact();
+          const phoneFromData = contact?._data?.phoneNumber
+            || contact?._data?.verifiedName
+            || contact?.number;
+          const digits = String(phoneFromData || '').replace(/\D/g, '');
+          if (digits.length >= 10 && digits.length <= 13) {
+            clientPhone = digits;
+          } else {
+            clientPhone = String(message.author || chatId).split('@')[0];
+          }
+        }
+      }
+      console.log(`[Phone] Teléfono final extraído: ${clientPhone} (chatId: ${chatId})`);
+    } catch (contactErr) {
+      clientPhone = chatId.split('@')[0];
+      console.warn('[Phone] Error obteniendo contacto, usando fallback:', clientPhone);
+    }
+
+    // Filtrar si está configurado para responder solo a chats nuevos (desconocidos)
+    const onlyRespondToUnknown = await getOnlyRespondToUnknown();
+    if (onlyRespondToUnknown) {
+      const contact = await message.getContact();
+      const adminJid = await getAdminJid();
+      const adminPhone = adminJid.replace('@c.us', '');
+
+      if (contact && contact.isMyContact && clientPhone !== adminPhone) {
+        console.log(`[Mensaje Ignorado] De: ${chatId} (${contact.name || 'Sin Nombre'}) | Razón: Es contacto guardado en la agenda, no es el admin y el filtro está activo`);
+        return;
+      }
+    }
+
+    // Control de bucles: verificar límites de velocidad antes de responder
+    if (!rateLimits.has(chatId)) {
+      rateLimits.set(chatId, { timestamps: [], isPaused: false, pausedUntil: 0 });
+    }
+    const limit = rateLimits.get(chatId);
+    
+    // Limpiar timestamps que sean más antiguos de 1 minuto (60.000 ms)
+    limit.timestamps = limit.timestamps.filter(t => now - t < 60000);
+
+    // Si se han enviado 6 respuestas o más en el último minuto, asumimos un bucle infinito de chatbots
+    if (limit.timestamps.length >= 6) {
+      limit.isPaused = true;
+      limit.pausedUntil = now + 900000; // Pausa de 15 minutos (900.000 ms) para pruebas y seguridad
+      console.warn(`⚠️ [ALERTA DE BUCLE] Posible bucle de chatbots detectado con ${chatId}. Pausando respuestas por 15 minutos.`);
+      await message.reply('🤖 *Control de seguridad:* He detectado respuestas automáticas demasiado rápidas en este chat. Para tu tranquilidad, he pausado temporalmente mis respuestas automáticas y he transferido este chat a un ejecutivo humano de nuestro equipo, quien te contactará en breve. ¡Muchas gracias por tu comprensión!');
+      return;
+    }
+
+    // Registrar el timestamp de la respuesta que vamos a emitir
+    limit.timestamps.push(now);
+
+    // Indicar en WhatsApp que el bot está escribiendo
+    await chat.sendStateTyping();
+
+    // Ejecutar el ciclo de razonamiento (Agent Loop) con el historial, la nueva consulta y el teléfono del cliente
+    const agentResponse = await runAgent(history, messageBody, clientPhone);
+
+    console.log(`[Respuesta Preparada] Hacia: ${chatId} | Texto: "${agentResponse.answer}"`);
+
+    // Enviar respuesta al cliente
+    await message.reply(agentResponse.answer);
+
+    // Actualizar el historial en memoria con el nuevo flujo retornado por el agente
+    let updatedHistory = agentResponse.history;
+
+    // Recortar historial si excede el límite para evitar costos excesivos de tokens
+    if (updatedHistory.length > MAX_HISTORY_LENGTH) {
+      // Recortar pero siempre empezar desde un turno 'user' para no romper
+      // el orden requerido por Gemini: user → model → function → model...
+      let sliced = updatedHistory.slice(updatedHistory.length - MAX_HISTORY_LENGTH);
+      // Asegurarse de que el primer mensaje sea de rol 'user'
+      const firstUserIdx = sliced.findIndex(m => m.role === 'user');
+      updatedHistory = firstUserIdx > 0 ? sliced.slice(firstUserIdx) : sliced;
+    }
+
+    // Filtrar entradas corruptas (sin parts o con parts vacíos)
+    updatedHistory = updatedHistory.filter(m => m && m.parts && m.parts.length > 0);
+
+    chatHistories.set(chatId, updatedHistory);
+    console.log(`[Respuesta Enviada] Hacia: ${chatId} | Historial actualizado (${updatedHistory.length} entradas)`);
+
+  } catch (error) {
+    console.error('❌ Error al procesar mensaje:', error);
+    try {
+      const botPhone = await getBotPhoneFormatted();
+      await message.reply(`Lo siento, tuve un problema interno al procesar tu mensaje. Por favor, intenta de nuevo en unos momentos o contáctanos directamente al ${botPhone}.`);
+    } catch (replyError) {
+      console.error('Error al intentar enviar mensaje de error de respaldo:', replyError);
+    }
+  }
+});
+
+// Escuchar evento de creación de pedidos para notificar a la central
+orderEvents.on('orderCreated', async (order) => {
+  try {
+    const centralJid = await getAdminJid();
+    
+    // Formatear los ítems en una lista legible
+    const itemsList = order.items
+      ? order.items.map(item => `- *${item.cantidad}x* ${item.nombre} (_$${item.precio.toLocaleString('es-CL')}_)`).join('\n')
+      : 'Sin productos';
+
+    // Normalizar el teléfono para mostrar como +56XXXXXXXXX
+    const rawPhone = String(order.clientPhone).replace(/\D/g, '');
+    // Si ya tiene código país (empieza por 56 y tiene 11 dígitos), lo usamos directo
+    const cleanPhone = rawPhone.startsWith('56') && rawPhone.length >= 11
+      ? rawPhone
+      : rawPhone.length === 9
+        ? `56${rawPhone}` // número local chileno sin prefijo
+        : rawPhone;
+
+    const notificationMessage = `🔔 *NUEVO PEDIDO REGISTRADO (#${order.orderId})* 🔔
+
+👤 *Cliente:* ${order.nombreCliente}
+📱 *Teléfono:* +${cleanPhone}
+📍 *Dirección:* ${order.direccion}, ${order.ciudad}
+🚚 *Método de entrega:* ${order.metodoEntrega}
+💵 *Costo de envío:* $${(order.costoDelivery || 0).toLocaleString('es-CL')}
+📅 *Fecha de despacho:* ${order.fechaDespacho || 'No especificada'}
+⏰ *Horario de despacho:* ${order.horaDespacho || 'No especificado'}
+📝 *Notas para el repartidor:* ${order.notas || 'Ninguna'}
+
+🛒 *Productos:*
+${itemsList}
+
+💰 *Subtotal:* $${(order.subtotal || 0).toLocaleString('es-CL')}
+💵 *Descuento:* $${(order.descuento || 0).toLocaleString('es-CL')}
+Total: *$${(order.total || 0).toLocaleString('es-CL')}*`;
+
+    console.log(`[Notificación Central] Enviando detalles del pedido #${order.orderId} al número central...`);
+    await client.sendMessage(centralJid, notificationMessage);
+    console.log(`[Notificación Central] Mensaje enviado exitosamente a la central.`);
+  } catch (error) {
+    console.error('❌ Error al enviar notificación a la central:', error);
+  }
+});
+
+// Escuchar evento de actualización de pedidos para notificar al administrador
+orderEvents.on('orderUpdated', async (update) => {
+  try {
+    const centralJid = await getAdminJid();
+    
+    // Normalizar el teléfono para mostrar como +56XXXXXXXXX
+    const rawPhone = String(update.clientPhone).replace(/\D/g, '');
+    const cleanPhone = rawPhone.startsWith('56') && rawPhone.length >= 11
+      ? rawPhone
+      : rawPhone.length === 9
+        ? `56${rawPhone}`
+        : rawPhone;
+
+    // Helper para normalizar la fecha de despacho
+    const formatDateVal = (val) => {
+      if (!val) return 'No especificada';
+      if (val instanceof Date) {
+        const y = val.getFullYear();
+        const m = String(val.getMonth() + 1).padStart(2, '0');
+        const d = String(val.getDate()).padStart(2, '0');
+        return `${y}-${m}-${d}`;
+      }
+      if (typeof val === 'string' && val.includes('T')) {
+        return val.split('T')[0];
+      }
+      return String(val);
+    };
+
+    const newFecha = formatDateVal(update.newDetails.fechaDespacho);
+    const oldFecha = formatDateVal(update.oldDetails.fechaDespacho);
+
+    // Detectar qué campos cambiaron
+    const changes = [];
+    if (newFecha !== oldFecha) {
+      changes.push(`📅 *Fecha de despacho:* ${newFecha} (_antes: ${oldFecha}_)`);
+    }
+    
+    const newHora = update.newDetails.horaDespacho || 'No especificado';
+    const oldHora = update.oldDetails.horaDespacho || 'No especificado';
+    if (newHora !== oldHora) {
+      changes.push(`⏰ *Horario de despacho:* ${newHora} (_antes: ${oldHora}_)`);
+    }
+
+    const newNotas = update.newDetails.notas || 'Ninguna';
+    const oldNotas = update.oldDetails.notes || update.oldDetails.notas || 'Ninguna';
+    if (newNotas !== oldNotas) {
+      changes.push(`📝 *Notas para el repartidor:* ${newNotas} (_antes: ${oldNotas}_)`);
+    }
+
+    // Si no se detectan diferencias reales, no enviar nada
+    if (changes.length === 0) return;
+
+    const notificationMessage = `✏️ *PEDIDO MODIFICADO (#${update.orderId})* ✏️
+
+👤 *Cliente:* ${update.nombreCliente}
+📱 *Teléfono:* +${cleanPhone}
+
+*Modificaciones realizadas:*
+${changes.join('\n')}`;
+
+    console.log(`[Notificación Central] Enviando actualización del pedido #${update.orderId} al número central...`);
+    await client.sendMessage(centralJid, notificationMessage);
+    console.log(`[Notificación Central] Mensaje de actualización enviado exitosamente a la central.`);
+  } catch (error) {
+    console.error('❌ Error al enviar notificación de actualización a la central:', error);
+  }
+});
+
+// Escuchar evento de anulación de pedidos para notificar al administrador
+orderEvents.on('orderCancelled', async (order) => {
+  try {
+    const centralJid = await getAdminJid();
+
+    // Normalizar el teléfono para mostrar como +56XXXXXXXXX
+    const rawPhone = String(order.clientPhone).replace(/\D/g, '');
+    const cleanPhone = rawPhone.startsWith('56') && rawPhone.length >= 11
+      ? rawPhone
+      : rawPhone.length === 9
+        ? `56${rawPhone}`
+        : rawPhone;
+
+    const notificationMessage = `🚨 *PEDIDO ANULADO (#${order.orderId})* 🚨
+
+👤 *Cliente:* ${order.nombreCliente}
+📱 *Teléfono:* +${cleanPhone}
+💰 *Monto Total:* $${(order.total || 0).toLocaleString('es-CL')}
+
+El cliente ha solicitado la anulación de este pedido directamente desde el chat de WhatsApp.`;
+
+    console.log(`[Notificación Central] Enviando anulación del pedido #${order.orderId} al número central...`);
+    await client.sendMessage(centralJid, notificationMessage);
+    console.log(`[Notificación Central] Mensaje de anulación enviado exitosamente a la central.`);
+  } catch (error) {
+    console.error('❌ Error al enviar notificación de anulación a la central:', error);
+  }
+});
+
+// Manejo de desconexión
+client.on('disconnected', (reason) => {
+  console.log('⚠️ El bot se desconectó de WhatsApp:', reason);
+});
+
+// Captura periódica de pantalla para diagnóstico visual y bypass de landing page
+landingBypassInterval = setInterval(async () => {
+  if (client.pupPage) {
+    try {
+      const info = await client.pupPage.evaluate(() => {
+        const elements = Array.from(document.querySelectorAll('a, button, [role="button"], span, div'));
+        const target = elements.find(el => {
+          const text = el.textContent ? el.textContent.trim().replace(/\s+/g, ' ') : '';
+          return text === 'Continuar en WhatsApp Web';
+        });
+        if (target) {
+          const detail = {
+            tagName: target.tagName,
+            outerHTML: target.outerHTML.slice(0, 200),
+            href: target.href || null,
+            targetAttr: target.target || null
+          };
+          if (target.tagName === 'A' && target.target === '_blank') {
+            target.target = '_self';
+          }
+          target.click();
+          return detail;
+        }
+        return null;
+      });
+      if (info) {
+        console.log('[Puppeteer] Encontrado y clicado el elemento exacto para continuar:', info);
+      }
+    } catch (err) {
+      console.error('[Puppeteer] Error al intentar evadir landing page:', err);
+    }
+    try {
+      await client.pupPage.screenshot({ path: './whatsapp-debug.png' });
+      await client.pupPage.screenshot({ path: 'C:\\Users\\obal_\\.gemini\\antigravity\\brain\\f745f6fe-1b16-451e-aa4b-006446409b9a\\whatsapp-debug.png' });
+    } catch (e) {
+      // Ignorar si la página aún no está lista
+    }
+  }
+}, 10000);
+
+// Iniciar conexión
+client.initialize();
+

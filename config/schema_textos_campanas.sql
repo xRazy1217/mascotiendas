@@ -26,7 +26,7 @@ INSERT IGNORE INTO textos (clave, valor, tipo) VALUES
 ('hero_subtitulo',    'Comida para perros y gatos · Arena sanitaria · Farmacia veterinaria', 'texto'),
 ('hero_imagen',       'https://images.unsplash.com/photo-1537151608828-ea2b11777ee8?auto=format&fit=crop&w=500&h=500', 'imagen'),
 ('delivery_titulo',   'Nuestro delivery es exclusivo en la conurbación La Serena – Coquimbo', 'texto'),
-('delivery_texto',    'Delivery gratis en todo La Serena y Coquimbo zona urbana. Consulta cobertura por WhatsApp antes de comprar.', 'texto'),
+('delivery_texto',    'Delivery gratis en todo La Serena y Coquimbo. Consulta cobertura por WhatsApp antes de comprar.', 'texto'),
 ('delivery_imagen',   'https://mascotiendas.cl/wp-content/uploads/2025/02/IMG-20250130-WA0049-768x768.jpg', 'imagen'),
 ('footer_email',      'ventas@mascotiendas.cl', 'texto'),
 ('footer_telefono',   '+569 5379 3135', 'texto'),
@@ -36,4 +36,8 @@ INSERT IGNORE INTO textos (clave, valor, tipo) VALUES
 ('info_item1',        'Comida Perros y Gatos', 'texto'),
 ('info_item2',        'Farmacia Veterinaria', 'texto'),
 ('info_item3',        'Delivery Gratis', 'texto'),
-('info_item4',        '+569 5379 3135', 'texto');
+('info_item4',        '+569 5379 3135', 'texto'),
+('cat_perros_imagen',   'https://images.unsplash.com/photo-1516734212186-a967f81ad0d7?auto=format&fit=crop&w=400', 'imagen'),
+('cat_gatos_imagen',    'https://images.unsplash.com/photo-1514888286974-6c03e2ca1dba?auto=format&fit=crop&w=400', 'imagen'),
+('cat_arena_imagen',    'https://images.unsplash.com/photo-1585110396000-c9ffd4e4b308?auto=format&fit=crop&w=400', 'imagen'),
+('cat_farmacia_imagen', 'https://images.unsplash.com/photo-1584308666744-24d5c474f2ae?auto=format&fit=crop&w=400', 'imagen');

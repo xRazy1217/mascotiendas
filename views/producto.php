@@ -4,7 +4,7 @@
     <i class="fas fa-spinner fa-spin text-mt-orange text-4xl"></i>
   </div>
 
-  <template x-if="productoDetalle && !cargandoProducto">
+  <template x-if="productoDetalle && !productoDetalle.error && !cargandoProducto">
     <div>
       <!-- Breadcrumb -->
       <div class="flex items-center gap-2 text-xs font-bold text-slate-400 mb-6">
@@ -20,9 +20,11 @@
         <!-- Galería -->
         <div>
           <div class="bg-mt-cream rounded-[2rem] overflow-hidden mb-3 aspect-square flex items-center justify-center relative">
-            <img :src="imagenActiva||'/mascotiendas/assets/no-image.png'"
+            <img :src="getProductImage(imagenActiva)"
                  :alt="productoDetalle.nombre"
-                 class="w-full h-full object-contain p-6 transition-all duration-300">
+                 :style="getImageStyle(getActiveImageCrop(), 'detalle')"
+                 width="600" height="600"
+                 class="w-full h-full transition-all duration-300">
             <!-- Badge oferta -->
             <div x-show="productoDetalle.precio_rebajado"
                  class="absolute top-3 left-3 bg-mt-orange text-white text-xs font-black px-3 py-1 rounded-full uppercase">
@@ -32,9 +34,13 @@
           <div x-show="productoDetalle.imagenes?.length > 1" class="flex gap-2 overflow-x-auto pb-1">
             <template x-for="img in productoDetalle.imagenes" :key="img.posicion">
               <button @click="imagenActiva=img.url"
-                      class="flex-shrink-0 w-20 h-20 rounded-2xl overflow-hidden border-2 transition-all"
+                      aria-label="Ver miniatura del producto"
+                      class="flex-shrink-0 w-20 h-20 rounded-2xl overflow-hidden border-2 transition-all bg-mt-cream"
                       :class="imagenActiva===img.url?'border-mt-orange':'border-mt-cream hover:border-mt-orange'">
-                <img :src="img.url" class="w-full h-full object-cover">
+                <img :src="getProductImage(img.url)"
+                     :style="getImageStyle(img.crop_config, 'miniatura')"
+                     width="80" height="80"
+                     class="w-full h-full object-cover">
               </button>
             </template>
           </div>
@@ -46,7 +52,7 @@
           <!-- Categorías -->
           <div class="flex flex-wrap gap-1 mb-3">
             <template x-for="cat in (productoDetalle.categorias||[])" :key="cat.slug">
-              <span class="text-[10px] font-black text-mt-orange uppercase tracking-widest bg-mt-cream px-3 py-1 rounded-full"
+              <span class="text-[10px] font-black text-mt-brown uppercase tracking-widest bg-mt-cream px-3 py-1 rounded-full"
                     x-text="cat.nombre"></span>
             </template>
           </div>
@@ -136,9 +142,11 @@
                class="flex gap-3 mb-4">
             <div class="flex items-center gap-2 bg-mt-cream rounded-xl px-4 py-3">
               <button @click="modalCantidad>1?modalCantidad--:null"
+                      aria-label="Disminuir cantidad"
                       class="w-8 h-8 rounded-lg bg-white font-black text-mt-brown hover:bg-mt-orange hover:text-white transition-colors flex items-center justify-center shadow-sm text-lg">−</button>
               <span class="font-black text-mt-brown w-8 text-center text-lg" x-text="modalCantidad"></span>
               <button @click="modalCantidad++"
+                      aria-label="Aumentar cantidad"
                       class="w-8 h-8 rounded-lg bg-white font-black text-mt-brown hover:bg-mt-orange hover:text-white transition-colors flex items-center justify-center shadow-sm text-lg">+</button>
             </div>
             <button @click="addToCartDetalle()"
@@ -172,7 +180,7 @@
           <!-- WhatsApp -->
           <a :href="'https://wa.me/56953793135?text=Hola!+Me+interesa:+'+encodeURIComponent(productoDetalle.nombre)"
              target="_blank"
-             class="flex items-center justify-center gap-2 py-3 rounded-xl border-2 border-[#25D366] text-[#25D366] font-black text-sm hover:bg-[#25D366] hover:text-white transition-colors">
+             class="flex items-center justify-center gap-2 py-3 rounded-xl border-2 border-[#0b3d26] text-[#0b3d26] font-black text-sm hover:bg-[#25D366] hover:text-[#0b3d26] hover:border-[#25D366] transition-colors">
             <i class="fab fa-whatsapp text-lg"></i> Consultar por WhatsApp
           </a>
 
@@ -283,17 +291,39 @@
         </div>
         <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
           <template x-for="p in productosRelacionados" :key="p.id">
-            <div @click="abrirProducto(p.id)"
-                 class="bg-white p-4 rounded-[2rem] border border-mt-cream hover:shadow-lg transition-all cursor-pointer group flex flex-col">
-              <img :src="p.imagen||'/mascotiendas/assets/no-image.png'" :alt="p.nombre"
-                   class="w-full h-36 object-cover rounded-2xl mb-3 group-hover:scale-105 transition-transform">
-              <h4 class="font-bold text-mt-brown text-sm mb-3 line-clamp-2 italic flex-grow" x-text="p.nombre"></h4>
-              <p class="font-black text-mt-brown" x-text="formatPrecio(p.precio_rebajado||p.precio_normal)"></p>
+            <div @click="abrirProducto(p.id, true, p.slug)"
+                 class="premium-card bg-white p-4 rounded-[2.5rem] border border-mt-cream cursor-pointer group flex flex-col justify-between shadow-sm relative overflow-hidden">
+              <div class="relative mb-3">
+                <div class="overflow-hidden rounded-[2rem] aspect-[4/3] w-full bg-mt-cream relative">
+                  <img :src="getProductImage(p.imagen)" :alt="p.nombre"
+                       :style="getImageStyle(p.imagen_crop, 'catalogo')"
+                       width="400" height="300"
+                       class="premium-card-img w-full h-full object-cover">
+                </div>
+                <span x-show="!p.en_stock"
+                      class="absolute top-3 left-3 bg-red-500 text-white text-[9px] font-black px-3 py-1 rounded-full uppercase tracking-wider z-10 shadow-sm">Sin stock</span>
+                <span x-show="p.precio_rebajado"
+                      class="absolute top-3 right-3 glass-effect text-mt-orange text-[9px] font-black px-3 py-1 rounded-full uppercase tracking-wider z-10 shadow-sm">Oferta</span>
+              </div>
+              <h4 class="font-black text-mt-brown text-sm leading-tight mb-3 line-clamp-2 italic flex-grow hover:text-mt-orange transition-colors duration-200" x-text="p.nombre"></h4>
+              <p class="font-black text-mt-brown mt-auto" x-text="formatPrecio(p.precio_rebajado||p.precio_normal)"></p>
             </div>
           </template>
         </div>
       </div>
 
+    </div>
+  </template>
+
+  <!-- Error 404: Producto no encontrado -->
+  <template x-if="productoDetalle && productoDetalle.error && !cargandoProducto">
+    <div class="bg-white rounded-[3rem] p-16 text-center border border-mt-cream shadow-sm max-w-lg mx-auto my-10">
+      <i class="fas fa-exclamation-circle text-5xl text-mt-orange mb-4"></i>
+      <h3 class="text-xl font-black text-mt-brown uppercase mb-2">Producto no encontrado</h3>
+      <p class="text-sm font-bold text-slate-500 italic mb-6">Lo sentimos, el producto solicitado no existe o no se encuentra activo en nuestro catálogo.</p>
+      <button @click="page='tienda';cargarProductos()" class="bg-mt-orange text-white px-8 py-3 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-orange-500 transition-colors shadow-lg">
+        Ver Catálogo
+      </button>
     </div>
   </template>
 </div>

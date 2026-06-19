@@ -47,8 +47,9 @@ function listarProductos(PDO $pdo): void {
     $totalRows = (int)$total->fetchColumn();
 
     $stmt = $pdo->prepare("
-        SELECT p.id, p.nombre, p.precio_normal, p.precio_rebajado, p.en_stock,
+        SELECT p.id, p.nombre, p.precio_normal, p.precio_rebajado, p.en_stock, p.slug,
                (SELECT url FROM producto_imagenes pi WHERE pi.producto_id = p.id AND pi.posicion = 0 LIMIT 1) AS imagen,
+               (SELECT crop_config FROM producto_imagenes pi WHERE pi.producto_id = p.id AND pi.posicion = 0 LIMIT 1) AS imagen_crop,
                (SELECT GROUP_CONCAT(c.nombre SEPARATOR ', ') FROM producto_categorias pc JOIN categorias c ON pc.categoria_id = c.id WHERE pc.producto_id = p.id) AS categorias
         FROM productos p
         WHERE $whereSQL
@@ -74,11 +75,11 @@ function detalleProducto(PDO $pdo): void {
     $producto = $stmt->fetch();
     if (!$producto) jsonResponse(['error' => 'No encontrado'], 404);
 
-    $imgs = $pdo->prepare("SELECT id, url, posicion FROM producto_imagenes WHERE producto_id = ? ORDER BY posicion");
+    $imgs = $pdo->prepare("SELECT id, url, posicion, crop_config FROM producto_imagenes WHERE producto_id = ? ORDER BY posicion");
     $imgs->execute([$id]);
     $producto['imagenes'] = $imgs->fetchAll();
 
-    $cats = $pdo->prepare("SELECT c.nombre, c.slug FROM producto_categorias pc JOIN categorias c ON pc.categoria_id = c.id WHERE pc.producto_id = ?");
+    $cats = $pdo->prepare("SELECT c.id, c.nombre, c.slug FROM producto_categorias pc JOIN categorias c ON pc.categoria_id = c.id WHERE pc.producto_id = ?");
     $cats->execute([$id]);
     $producto['categorias'] = $cats->fetchAll();
 
@@ -92,8 +93,9 @@ function listarCategorias(PDO $pdo): void {
 
 function destacados(PDO $pdo): void {
     $stmt = $pdo->query("
-        SELECT p.id, p.nombre, p.precio_normal, p.precio_rebajado, p.en_stock,
-               (SELECT url FROM producto_imagenes pi WHERE pi.producto_id = p.id AND pi.posicion = 0 LIMIT 1) AS imagen
+        SELECT p.id, p.nombre, p.precio_normal, p.precio_rebajado, p.en_stock, p.slug,
+               (SELECT url FROM producto_imagenes pi WHERE pi.producto_id = p.id AND pi.posicion = 0 LIMIT 1) AS imagen,
+               (SELECT crop_config FROM producto_imagenes pi WHERE pi.producto_id = p.id AND pi.posicion = 0 LIMIT 1) AS imagen_crop
         FROM productos p WHERE p.activo = 1 AND p.en_stock = 1
         ORDER BY RAND() LIMIT 8
     ");

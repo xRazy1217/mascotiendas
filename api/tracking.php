@@ -1,8 +1,6 @@
 <?php
 require_once __DIR__ . '/../includes/funciones.php';
-session_name('mascotiendas');
-ini_set('session.cookie_path', '/');
-session_start();
+checkCSRF();
 
 $pdo    = getPDO();
 $action = $_POST['action'] ?? $_GET['action'] ?? '';
@@ -78,31 +76,33 @@ function guardarCarrito(PDO $pdo): void {
     $email = trim($_POST['email'] ?? '');
     $items = $_POST['items'] ?? '[]';
     $total = (int)($_POST['total'] ?? 0);
+    $sid   = session_id();
 
     if (!$uid && !$email) jsonResponse(['ok' => false]);
     if ($total <= 0) jsonResponse(['ok' => false]);
 
-    if ($uid) {
-        $check = $pdo->prepare("SELECT id FROM carritos_abandonados WHERE usuario_id=? AND recuperado=0");
-        $check->execute([$uid]);
-        $existe = $check->fetch();
-        if ($existe) {
-            $pdo->prepare("UPDATE carritos_abandonados SET items=?,total=? WHERE id=?")
-                ->execute([$items, $total, $existe['id']]);
-        } else {
-            $pdo->prepare("INSERT INTO carritos_abandonados (usuario_id,email,items,total) VALUES (?,?,?,?)")
-                ->execute([$uid, $email, $items, $total]);
-        }
+    $check = $pdo->prepare("SELECT id FROM carritos_sesiones WHERE token_sesion = ? OR (id_usuario = ? AND id_usuario IS NOT NULL)");
+    $check->execute([$sid, $uid]);
+    $existe = $check->fetch();
+
+    if ($existe) {
+        $pdo->prepare("UPDATE carritos_sesiones SET datos_carrito=?, email_invitado=?, estado='activo', fecha_actualizacion=NOW() WHERE id=?")
+            ->execute([$items, $email, $existe['id']]);
+    } else {
+        $pdo->prepare("INSERT INTO carritos_sesiones (token_sesion, id_usuario, email_invitado, datos_carrito) VALUES (?,?,?,?)")
+            ->execute([$sid, $uid, $email, $items]);
     }
+    
     jsonResponse(['ok' => true]);
 }
 
 function obtenerCarrito(PDO $pdo): void {
     $uid = $_SESSION['usuario_id'] ?? null;
-    if (!$uid) jsonResponse(['items' => null]);
+    $sid = session_id();
 
-    $stmt = $pdo->prepare("SELECT items FROM carritos_abandonados WHERE usuario_id=? AND recuperado=0 ORDER BY actualizado_en DESC LIMIT 1");
-    $stmt->execute([$uid]);
+    $stmt = $pdo->prepare("SELECT datos_carrito FROM carritos_sesiones WHERE (id_usuario=? OR token_sesion=?) AND estado != 'completado' ORDER BY fecha_actualizacion DESC LIMIT 1");
+    $stmt->execute([$uid, $sid]);
     $row = $stmt->fetch();
-    jsonResponse(['items' => $row ? json_decode($row['items']) : null]);
+    
+    jsonResponse(['items' => $row ? json_decode($row['datos_carrito']) : null]);
 }

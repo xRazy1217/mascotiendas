@@ -22,7 +22,7 @@
           <tr class="border-t border-mt-cream hover:bg-slate-50 transition-colors">
             <td class="px-4 py-3">
               <div class="flex items-center gap-3">
-                <img :src="p.imagen_portada||'https://images.unsplash.com/photo-1548199973-03cce0bbc87b?w=80'"
+                <img :src="getProductImage(p.imagen_portada||'https://images.unsplash.com/photo-1548199973-03cce0bbc87b?w=80')"
                      class="w-12 h-12 object-cover rounded-xl flex-shrink-0">
                 <div>
                   <p class="font-bold text-mt-brown line-clamp-1" x-text="p.titulo"></p>
@@ -80,7 +80,7 @@
           <input x-model="formPost.imagen_portada" placeholder="URL imagen de portada"
                  class="w-full px-4 py-3 rounded-xl border border-mt-cream focus:outline-none focus:border-mt-orange font-bold text-sm">
           <div x-show="formPost.imagen_portada" class="rounded-xl overflow-hidden h-32">
-            <img :src="formPost.imagen_portada" class="w-full h-full object-cover">
+            <img :src="getProductImage(formPost.imagen_portada)" class="w-full h-full object-cover">
           </div>
           <textarea x-model="formPost.extracto" placeholder="Extracto / resumen corto" rows="2"
                     class="w-full px-4 py-3 rounded-xl border border-mt-cream focus:outline-none focus:border-mt-orange font-bold text-sm resize-none"></textarea>

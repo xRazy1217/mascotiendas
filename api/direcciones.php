@@ -1,8 +1,6 @@
 <?php
 require_once __DIR__ . '/../includes/funciones.php';
-session_name('mascotiendas');
-ini_set('session.cookie_path', '/');
-session_start();
+checkCSRF();
 
 if (empty($_SESSION['usuario_id'])) jsonResponse(['error' => 'No autenticado'], 401);
 

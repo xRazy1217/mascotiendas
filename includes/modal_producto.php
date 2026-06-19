@@ -61,7 +61,7 @@
             <!-- Categorías -->
             <div class="flex flex-wrap gap-1 mb-3">
               <template x-for="cat in (modalProducto.categorias||[])" :key="cat.slug">
-                <span class="text-[10px] font-black text-mt-orange uppercase tracking-widest bg-mt-cream px-2 py-0.5 rounded-full"
+                <span class="text-[10px] font-black text-mt-brown uppercase tracking-widest bg-mt-cream px-2 py-0.5 rounded-full"
                       x-text="cat.nombre"></span>
               </template>
             </div>
@@ -112,7 +112,7 @@
             <!-- WhatsApp consulta -->
             <a :href="'https://wa.me/56912345678?text=Hola!+Me+interesa+el+producto:+'+encodeURIComponent(modalProducto.nombre)"
                target="_blank"
-               class="flex items-center justify-center gap-2 py-3 rounded-xl border-2 border-[#25D366] text-[#25D366] font-black text-sm hover:bg-[#25D366] hover:text-white transition-colors">
+               class="flex items-center justify-center gap-2 py-3 rounded-xl border-2 border-[#0b3d26] text-[#0b3d26] font-black text-sm hover:bg-[#25D366] hover:text-[#0b3d26] hover:border-[#25D366] transition-colors">
               <i class="fab fa-whatsapp text-lg"></i> Consultar por WhatsApp
             </a>
 

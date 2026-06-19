@@ -21,10 +21,16 @@
                class="w-full px-4 py-2 rounded-xl border border-mt-cream focus:outline-none focus:border-mt-orange font-bold text-sm mt-1">
       </div>
       <div>
-        <label class="text-xs font-black text-slate-400 uppercase">URL Imagen</label>
+        <label class="text-xs font-black text-slate-400 uppercase">URL Imagen / Video</label>
         <input x-model="textos.hero_imagen" @change="guardarTexto('hero_imagen', textos.hero_imagen)"
-               class="w-full px-4 py-2 rounded-xl border border-mt-cream focus:outline-none focus:border-mt-orange font-bold text-sm mt-1">
-        <img :src="textos.hero_imagen" class="mt-2 h-24 rounded-xl object-cover" x-show="textos.hero_imagen">
+               class="w-full px-4 py-2 rounded-xl border border-mt-cream focus:outline-none focus:border-mt-orange font-bold text-sm mt-1"
+               placeholder="URL de imagen (.jpg, .png, .webp) o video (.mp4, .webm)">
+        <template x-if="textos.hero_imagen && /\.(mp4|webm|ogg|mov)(\?.*)?$/i.test(textos.hero_imagen)">
+          <video :src="getProductImage(textos.hero_imagen)" class="mt-2 h-24 rounded-xl object-cover" autoplay loop muted playsinline></video>
+        </template>
+        <template x-if="textos.hero_imagen && !/\.(mp4|webm|ogg|mov)(\?.*)?$/i.test(textos.hero_imagen)">
+          <img :src="getProductImage(textos.hero_imagen)" class="mt-2 h-24 rounded-xl object-cover">
+        </template>
       </div>
     </div>
   </div>
@@ -49,7 +55,40 @@
         <label class="text-xs font-black text-slate-400 uppercase">URL Imagen</label>
         <input x-model="textos.delivery_imagen" @change="guardarTexto('delivery_imagen', textos.delivery_imagen)"
                class="w-full px-4 py-2 rounded-xl border border-mt-cream focus:outline-none focus:border-mt-orange font-bold text-sm mt-1">
-        <img :src="textos.delivery_imagen" class="mt-2 h-24 rounded-xl object-cover" x-show="textos.delivery_imagen">
+        <img :src="getProductImage(textos.delivery_imagen)" class="mt-2 h-24 rounded-xl object-cover" x-show="textos.delivery_imagen">
+      </div>
+    </div>
+  </div>
+
+  <!-- Imágenes de Categorías -->
+  <div class="bg-white rounded-2xl shadow-sm border border-mt-cream p-5 mb-4">
+    <p class="font-black text-mt-brown text-sm uppercase tracking-widest mb-4 flex items-center gap-2">
+      <i class="fas fa-images text-mt-orange"></i> Imágenes de Categorías
+    </p>
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div>
+        <label class="text-xs font-black text-slate-400 uppercase">Comida Perros</label>
+        <input x-model="textos.cat_perros_imagen" @change="guardarTexto('cat_perros_imagen', textos.cat_perros_imagen)"
+               class="w-full px-4 py-2 rounded-xl border border-mt-cream focus:outline-none focus:border-mt-orange font-bold text-sm mt-1">
+        <img :src="getProductImage(textos.cat_perros_imagen)" class="mt-2 h-20 rounded-xl object-cover" x-show="textos.cat_perros_imagen">
+      </div>
+      <div>
+        <label class="text-xs font-black text-slate-400 uppercase">Comida Gatos</label>
+        <input x-model="textos.cat_gatos_imagen" @change="guardarTexto('cat_gatos_imagen', textos.cat_gatos_imagen)"
+               class="w-full px-4 py-2 rounded-xl border border-mt-cream focus:outline-none focus:border-mt-orange font-bold text-sm mt-1">
+        <img :src="getProductImage(textos.cat_gatos_imagen)" class="mt-2 h-20 rounded-xl object-cover" x-show="textos.cat_gatos_imagen">
+      </div>
+      <div>
+        <label class="text-xs font-black text-slate-400 uppercase">Arena Sanitaria</label>
+        <input x-model="textos.cat_arena_imagen" @change="guardarTexto('cat_arena_imagen', textos.cat_arena_imagen)"
+               class="w-full px-4 py-2 rounded-xl border border-mt-cream focus:outline-none focus:border-mt-orange font-bold text-sm mt-1">
+        <img :src="getProductImage(textos.cat_arena_imagen)" class="mt-2 h-20 rounded-xl object-cover" x-show="textos.cat_arena_imagen">
+      </div>
+      <div>
+        <label class="text-xs font-black text-slate-400 uppercase">Farmacia Veterinaria</label>
+        <input x-model="textos.cat_farmacia_imagen" @change="guardarTexto('cat_farmacia_imagen', textos.cat_farmacia_imagen)"
+               class="w-full px-4 py-2 rounded-xl border border-mt-cream focus:outline-none focus:border-mt-orange font-bold text-sm mt-1">
+        <img :src="getProductImage(textos.cat_farmacia_imagen)" class="mt-2 h-20 rounded-xl object-cover" x-show="textos.cat_farmacia_imagen">
       </div>
     </div>
   </div>

@@ -116,7 +116,7 @@
           <div class="space-y-2 mb-4">
             <template x-for="item in pedidoDetalle.items" :key="item.id">
               <div class="flex items-center gap-3 p-3 bg-slate-50 rounded-xl">
-                <img :src="item.imagen_url||'/assets/no-image.png'" class="w-10 h-10 object-cover rounded-lg">
+                <img :src="getProductImage(item.imagen_url)" class="w-10 h-10 object-cover rounded-lg">
                 <p class="flex-grow font-bold text-mt-brown text-sm line-clamp-1" x-text="item.nombre"></p>
                 <span class="text-xs text-slate-400 font-bold" x-text="'x'+item.cantidad"></span>
                 <span class="font-black text-mt-orange text-sm" x-text="formatPrecio(item.precio*item.cantidad)"></span>

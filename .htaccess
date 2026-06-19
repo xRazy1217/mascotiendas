@@ -1,10 +1,39 @@
+# Cabeceras de Seguridad HTTP
+<IfModule mod_headers.c>
+    Header set X-Frame-Options "SAMEORIGIN"
+    Header set X-Content-Type-Options "nosniff"
+    Header set X-XSS-Protection "1; mode=block"
+    Header set Referrer-Policy "strict-origin-when-cross-origin"
+</IfModule>
+
 Options -Indexes
 
 RewriteEngine On
-RewriteBase /
+# RewriteBase /
 
 # Sitemap
-RewriteRule ^sitemap\.xml$ index.php?sitemap=1 [QSA,L]
+RewriteRule ^sitemap\.xml$ api/contenido.php?action=sitemap [QSA,L]
+
+# Google Shopping Feed (Google Merchant Center)
+RewriteRule ^feed/google-shopping\.xml$ feeds/google-shopping.php [QSA,L]
+
+# Friendly URLs - SEO
+RewriteRule ^producto/([0-9]+)-(.*)$ index.php?p=producto&id=$1 [QSA,L]
+RewriteRule ^tienda/categoria/([0-9]+)-(.*)$ index.php?p=tienda&categoria=$1 [QSA,L]
+RewriteRule ^blog/([^/]+)$ index.php?p=blog&slug=$1 [QSA,L]
+RewriteRule ^pagina/([^/]+)$ index.php?p=pagina&slug=$1 [QSA,L]
+
+# Páginas principales sin parámetros
+RewriteRule ^tienda$ index.php?p=tienda [QSA,L]
+RewriteRule ^farmacia$ index.php?p=farmacia [QSA,L]
+RewriteRule ^comunidad$ index.php?p=comunidad [QSA,L]
+RewriteRule ^blog$ index.php?p=blog [QSA,L]
+RewriteRule ^carrito$ index.php?p=carrito [QSA,L]
+RewriteRule ^checkout$ index.php?p=checkout [QSA,L]
+RewriteRule ^perfil$ index.php?p=perfil [QSA,L]
+RewriteRule ^login$ index.php?p=login [QSA,L]
+RewriteRule ^registro$ index.php?p=registro [QSA,L]
+RewriteRule ^favoritos$ index.php?p=favoritos [QSA,L]
 
 # Archivos y carpetas reales pasan directo
 RewriteCond %{REQUEST_FILENAME} !-f
@@ -12,3 +41,43 @@ RewriteCond %{REQUEST_FILENAME} !-d
 
 # Todo lo demas va a index.php preservando query string
 RewriteRule ^ index.php [QSA,L]
+
+# ─── COMPRESIÓN GZIP (mod_deflate) ────────────────────
+<IfModule mod_deflate.c>
+    # Activar compresión
+    SetOutputFilter DEFLATE
+    
+    # Comprimir tipos de archivo específicos
+    AddOutputFilterByType DEFLATE text/html text/plain text/xml text/css text/javascript application/javascript application/x-javascript application/json application/xml application/xhtml+xml application/rss+xml application/vnd.ms-fontobject application/x-font-ttf image/svg+xml
+    
+    # Manejar fallbacks para navegadores antiguos
+    BrowserMatch ^Mozilla/4 gzip-only-text/html
+    BrowserMatch ^Mozilla/4\.0[678] no-gzip
+    BrowserMatch \bMSIE !no-gzip !gzip-only-text/html
+</IfModule>
+
+# ─── CACHÉ DE NAVEGADOR (mod_expires) ──────────────────
+<IfModule mod_expires.c>
+    ExpiresActive On
+    ExpiresDefault "access plus 1 month"
+    
+    # CSS y JS
+    ExpiresByType text/css "access plus 1 year"
+    ExpiresByType text/javascript "access plus 1 year"
+    ExpiresByType application/javascript "access plus 1 year"
+    ExpiresByType application/x-javascript "access plus 1 year"
+    
+    # Imágenes (incluyendo WebP)
+    ExpiresByType image/webp "access plus 1 year"
+    ExpiresByType image/jpeg "access plus 1 year"
+    ExpiresByType image/png "access plus 1 year"
+    ExpiresByType image/gif "access plus 1 year"
+    ExpiresByType image/x-icon "access plus 1 year"
+    ExpiresByType image/svg+xml "access plus 1 year"
+    
+    # Fuentes
+    ExpiresByType font/truetype "access plus 1 year"
+    ExpiresByType font/opentype "access plus 1 year"
+    ExpiresByType application/x-font-woff "access plus 1 year"
+    ExpiresByType application/font-woff2 "access plus 1 year"
+</IfModule>

@@ -23,7 +23,7 @@
                 class="p-4 rounded-2xl border-2 text-center transition-all">
           <i class="fas fa-truck text-mt-orange text-xl mb-1 block"></i>
           <p class="font-black text-mt-brown text-sm">Delivery</p>
-          <p class="text-xs text-slate-400">Zona urbana</p>
+          <p class="text-xs text-slate-400">Gratis</p>
         </button>
         <button type="button" @click="checkout.metodo_entrega='retiro'"
                 :class="checkout.metodo_entrega==='retiro'?'border-mt-orange bg-mt-cream':'border-mt-cream'"
@@ -165,9 +165,15 @@
           <span>Descuento cupón</span>
           <span x-text="'-'+formatPrecio(checkout.descuento||0)"></span>
         </div>
+        <!-- Descuento primer pedido -->
+        <div x-show="checkout.descuento_primer_pedido>0"
+             class="flex justify-between text-sm font-bold text-green-600 border-t border-mt-brown/10 pt-2">
+          <span>Descuento primer pedido</span>
+          <span x-text="'-'+formatPrecio(checkout.descuento_primer_pedido||0)"></span>
+        </div>
         <div class="border-t border-mt-brown/20 pt-2 flex justify-between font-black text-mt-brown text-lg">
           <span>Total:</span>
-          <span class="text-mt-orange" x-text="formatPrecio(totalConDescuento())"></span>
+          <span class="text-mt-brown" x-text="formatPrecio(totalConDescuento())"></span>
         </div>
       </div>
 
@@ -185,13 +191,13 @@
       </div>
 
       <!-- Descuento primer pedido -->
-      <div x-show="config.descuento_primer_pedido === '1' && usuario"
+      <div x-show="config.descuento_primer_pedido === '1' && usuario && checkout.descuento_primer_pedido > 0"
            class="p-3 bg-orange-50 border border-orange-200 rounded-xl text-xs font-bold text-orange-700">
-        <i class="fas fa-gift mr-1"></i>10% de descuento en tu primer pedido aplicado automáticamente.
+        <i class="fas fa-gift mr-1"></i><span x-text="(config.descuento_primer_pedido_valor || 10) + '% de descuento en tu primer pedido aplicado automáticamente.'"></span>
       </div>
 
       <button type="submit" :disabled="!checkout.metodo_pago"
-              class="w-full bg-green-500 text-white py-4 rounded-2xl font-black uppercase tracking-widest shadow-xl hover:bg-green-600 transition-colors disabled:opacity-60">
+              class="w-full bg-[#25D366] text-[#0b3d26] py-4 rounded-2xl font-black uppercase tracking-widest shadow-xl hover:bg-[#20ba5a] transition-colors disabled:opacity-60">
         <i class="fab fa-whatsapp mr-2 text-xl"></i>Confirmar por WhatsApp
       </button>
       <button type="button" @click="page='carrito'"

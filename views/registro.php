@@ -28,7 +28,7 @@
     </form>
     <p class="text-center mt-4 text-sm font-bold text-slate-400">
       ¿Ya tienes cuenta?
-      <button @click="page='login'" class="text-mt-orange hover:underline ml-1">Inicia sesión</button>
+      <button @click="page='login'" class="text-mt-brown hover:text-mt-orange font-black hover:underline ml-1">Inicia sesión</button>
     </p>
   </div>
 </div>

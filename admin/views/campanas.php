@@ -10,7 +10,7 @@
   <div class="space-y-3">
     <template x-for="c in listaCampanas" :key="c.id">
       <div class="bg-white rounded-2xl shadow-sm border border-mt-cream p-4 flex items-center gap-4">
-        <img :src="c.imagen_url||''" x-show="c.imagen_url" class="w-16 h-16 object-cover rounded-xl flex-shrink-0">
+        <img :src="getProductImage(c.imagen_url)" x-show="c.imagen_url" class="w-16 h-16 object-cover rounded-xl flex-shrink-0">
         <div class="flex-grow min-w-0">
           <div class="flex items-center gap-2 mb-1">
             <p class="font-black text-mt-brown" x-text="c.nombre"></p>

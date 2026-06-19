@@ -101,8 +101,8 @@ ALTER TABLE pedidos
 
 -- Datos iniciales zonas
 INSERT IGNORE INTO zonas_delivery (nombre, descripcion, costo) VALUES
-('La Serena Centro', 'Zona urbana La Serena', 0),
-('Coquimbo Centro', 'Zona urbana Coquimbo', 0),
+('La Serena Centro', 'La Serena', 0),
+('Coquimbo Centro', 'Coquimbo', 0),
 ('COVICO / Peñuelas', 'Sector periférico', 2000),
 ('Portal de Pinamar', 'Sector periférico', 2000),
 ('Fuera de cobertura', 'Consultar disponibilidad', 0);

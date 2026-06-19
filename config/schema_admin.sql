@@ -25,8 +25,8 @@ CREATE TABLE IF NOT EXISTS notificaciones (
 
 -- Agregar inventario y stock_minimo a productos si no existen
 ALTER TABLE productos 
-    ADD COLUMN IF NOT EXISTS stock_minimo INT NOT NULL DEFAULT 5,
-    ADD COLUMN IF NOT EXISTS inventario_actual INT NOT NULL DEFAULT 0;
+    ADD COLUMN stock_minimo INT NOT NULL DEFAULT 5,
+    ADD COLUMN inventario_actual INT NOT NULL DEFAULT 0;
 
 -- Cupones de ejemplo
 INSERT IGNORE INTO cupones (codigo, tipo, valor, minimo_compra, usos_max, activo) VALUES

@@ -1,0 +1,17 @@
+{
+  "name": "mascotiendas-agent",
+  "version": "1.0.0",
+  "description": "Chatbot Agente de WhatsApp para Mascotiendas",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "@google/generative-ai": "^0.11.0",
+    "dotenv": "^16.4.5",
+    "mysql2": "^3.9.7",
+    "qrcode-terminal": "^0.12.0",
+    "whatsapp-web.js": "^1.26.0"
+  }
+}

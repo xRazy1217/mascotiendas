@@ -1,9 +1,7 @@
 <?php
 require_once __DIR__ . '/../includes/funciones.php';
 
-session_name('mascotiendas');
-ini_set('session.cookie_path', '/');
-session_start();
+checkCSRF();
 
 $pdo    = getPDO();
 $action = $_POST['action'] ?? $_GET['action'] ?? '';
@@ -36,7 +34,8 @@ function listaFavoritos(PDO $pdo): void {
     if (empty($_SESSION['usuario_id'])) jsonResponse([]);
     $stmt = $pdo->prepare("
         SELECT p.id, p.nombre, p.precio_normal, p.precio_rebajado, p.en_stock,
-               (SELECT url FROM producto_imagenes WHERE producto_id=p.id AND posicion=0 LIMIT 1) as imagen
+               (SELECT url FROM producto_imagenes WHERE producto_id=p.id AND posicion=0 LIMIT 1) as imagen,
+               (SELECT crop_config FROM producto_imagenes WHERE producto_id=p.id AND posicion=0 LIMIT 1) as imagen_crop
         FROM favoritos f JOIN productos p ON f.producto_id=p.id
         WHERE f.usuario_id=? AND p.activo=1 ORDER BY f.creado_en DESC
     ");

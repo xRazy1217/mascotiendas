@@ -1,9 +1,7 @@
 <?php
 require_once __DIR__ . '/../includes/funciones.php';
 
-session_name('mascotiendas');
-ini_set('session.cookie_path', '/');
-session_start();
+checkCSRF();
 $pdo    = getPDO();
 $action = $_POST['action'] ?? $_GET['action'] ?? '';
 
@@ -29,6 +27,8 @@ function crearPedido(PDO $pdo): void {
     $metodo_entrega = sanitize($body['metodo_entrega'] ?? 'delivery');
     $metodo_pago    = sanitize($body['metodo_pago'] ?? 'transferencia');
     $items          = $body['items'] ?? [];
+    $zona_id        = !empty($body['zona_id']) ? (int)$body['zona_id'] : null;
+    $descuento      = max(0, !empty($body['descuento']) ? (int)$body['descuento'] : 0);
 
     if (!$nombre || !$email || empty($items)) {
         jsonResponse(['error' => 'Datos incompletos'], 400);
@@ -54,25 +54,51 @@ function crearPedido(PDO $pdo): void {
 
     if (empty($itemsVerificados)) jsonResponse(['error' => 'Carrito vacío o productos no disponibles'], 400);
 
+    // Calcular costo de delivery si corresponde
+    $costo_delivery = 0;
+    if ($metodo_entrega === 'delivery' && $zona_id) {
+        $stmt = $pdo->prepare("SELECT costo FROM zonas_delivery WHERE id = ? AND activo = 1");
+        $stmt->execute([$zona_id]);
+        $zona = $stmt->fetch();
+        if ($zona) {
+            $costo_delivery = (int)$zona['costo'];
+        }
+    }
+
+    $total = max(0, $subtotal + $costo_delivery - $descuento);
     $usuarioId = $_SESSION['usuario_id'] ?? null;
 
     $pdo->beginTransaction();
     try {
-        $stmt = $pdo->prepare("INSERT INTO pedidos (usuario_id, nombre_cliente, email_cliente, telefono, direccion, ciudad, sucursal, subtotal, total, notas, metodo_pago, metodo_entrega) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)");
-        $stmt->execute([$usuarioId, $nombre, $email, $tel, $dir, $ciudad, $sucursal, $subtotal, $subtotal, $notas, $metodo_pago, $metodo_entrega]);
+        $stmt = $pdo->prepare("INSERT INTO pedidos (usuario_id, nombre_cliente, email_cliente, telefono, direccion, ciudad, sucursal, subtotal, descuento, costo_delivery, zona_delivery_id, total, notas, metodo_pago, metodo_entrega) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
+        $stmt->execute([$usuarioId, $nombre, $email, $tel, $dir, $ciudad, $sucursal, $subtotal, $descuento, $costo_delivery, $zona_id, $total, $notas, $metodo_pago, $metodo_entrega]);
         $pedidoId = (int)$pdo->lastInsertId();
 
         $ins = $pdo->prepare("INSERT INTO pedido_items (pedido_id, producto_id, nombre, precio, cantidad, imagen_url) VALUES (?,?,?,?,?,?)");
         foreach ($itemsVerificados as $it) {
             $ins->execute([$pedidoId, $it['producto_id'], $it['nombre'], $it['precio'], $it['cantidad'], $it['imagen_url']]);
         }
+
+        // Marcar carrito abandonado como completado para evitar falsos recordatorios
+        $sid = session_id();
+        if ($usuarioId) {
+            $pdo->prepare("UPDATE carritos_sesiones SET estado='completado', fecha_actualizacion=NOW() WHERE id_usuario=? AND estado!='completado'")->execute([$usuarioId]);
+        } else {
+            $pdo->prepare("UPDATE carritos_sesiones SET estado='completado', fecha_actualizacion=NOW() WHERE token_sesion=? AND estado!='completado'")->execute([$sid]);
+        }
+
         $pdo->commit();
     } catch (Exception $e) {
         $pdo->rollBack();
         jsonResponse(['error' => 'Error al crear pedido'], 500);
     }
 
-    jsonResponse(['ok' => true, 'pedido_id' => $pedidoId, 'total' => $subtotal]);
+    if (empty($_SESSION['pedidos_invitado'])) {
+        $_SESSION['pedidos_invitado'] = [];
+    }
+    $_SESSION['pedidos_invitado'][] = $pedidoId;
+
+    jsonResponse(['ok' => true, 'pedido_id' => $pedidoId, 'total' => $total]);
 }
 
 function detallePedido(PDO $pdo): void {
@@ -85,7 +111,20 @@ function detallePedido(PDO $pdo): void {
     $pedido = $stmt->fetch();
 
     if (!$pedido) jsonResponse(['error' => 'No encontrado'], 404);
-    if ($usuarioId && $pedido['usuario_id'] != $usuarioId) jsonResponse(['error' => 'Sin acceso'], 403);
+    
+    $esAdmin = isset($_SESSION['rol']) && $_SESSION['rol'] === 'admin';
+    if (!$esAdmin) {
+        if (!empty($pedido['usuario_id'])) {
+            if (!$usuarioId || $pedido['usuario_id'] != $usuarioId) {
+                jsonResponse(['error' => 'Sin acceso'], 403);
+            }
+        } else {
+            $pedidosInvitado = $_SESSION['pedidos_invitado'] ?? [];
+            if (!in_array($pedido['id'], $pedidosInvitado)) {
+                jsonResponse(['error' => 'Sin acceso'], 403);
+            }
+        }
+    }
 
     $items = $pdo->prepare("SELECT * FROM pedido_items WHERE pedido_id = ?");
     $items->execute([$id]);
