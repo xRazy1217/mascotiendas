@@ -1,168 +1,237 @@
-# 🤖 Mascotiendas WhatsApp Bot
+# 🤖 Mascotiendas WhatsApp Bot — "Max"
 
-Este es el bot oficial de WhatsApp para **Mascotiendas La Serena/Coquimbo**. Su objetivo principal es interactuar de manera fluida y con tono local chileno con los clientes, gestionar el stock, y permitir a los clientes registrar y actualizar detalles de despacho de sus pedidos de manera automática en la base de datos, notificando en tiempo real al administrador de la tienda.
+Bot oficial de WhatsApp para **Mascotiendas La Serena/Coquimbo**. Atiende a los clientes 24/7 con tono local chileno bajo la identidad de **Max**, un vendedor humano; busca productos y stock, toma y agenda pedidos en la base de datos, deriva casos a un ejecutivo, y coordina la operación entre los roles de **ventas, despacho y administración**, cada uno desde su propio WhatsApp.
+
+Construido sobre **Node.js** con `whatsapp-web.js` (Puppeteer / Chrome headless) y **Gemini** (`gemini-2.5-flash`) como motor de razonamiento, conectado a **MariaDB** (WAMP, puerto `3308`).
 
 ---
 
-## 🗺️ Arquitectura y Flujo del Sistema
-
-El bot está construido sobre **Node.js** usando la librería `whatsapp-web.js` para controlar una sesión web de WhatsApp a través de un navegador Puppeteer (Chrome headless). Utiliza **Gemini** (a través de la API oficial de Google Gen AI) como motor de entendimiento y razonamiento, conectándose a una base de datos **MariaDB** local (WAMP).
-
-El flujo de información es el siguiente:
+## 🗺️ Arquitectura y flujo
 
 ```mermaid
 graph TD
-    User([Cliente en WhatsApp]) -->|Envía Mensaje| Index[index.js (WhatsApp Client)]
-    Index -->|Extrae Teléfono & Historial| Agent[agent.js (Gemini Agent)]
-    Agent -->|Razona y ejecuta herramientas| Tools[tools.js (SQL Queries)]
-    Tools -->|Actualiza/Consulta| DB[(Base de Datos MariaDB)]
-    Tools -->|Emite Eventos de Pedidos| Events[events.js (EventEmitter)]
-    Events -->|Detecta orderCreated / orderUpdated| Index
-    Index -->|Envía Alerta Formateada| Admin([Administrador +56920571475])
-    Agent -->|Genera Respuesta Final| Index
-    Index -->|Responde con tono chileno| User
+    Cliente([Cliente WhatsApp]) -->|mensaje| Index[index.js]
+    Staff([Ventas / Despacho / Admin]) -->|comando o lenguaje natural| Index
+    Index -->|¿es staff?| Roles[roles.js resolveRole]
+    Index -->|cliente| Agent[agent.js · Max/Gemini]
+    Index -->|staff| StaffMod[staff.js permisos + NL]
+    Agent -->|herramientas| Tools[tools.js]
+    StaffMod --> OrdersAdmin[orders-admin.js]
+    Tools --> DB[(MariaDB)]
+    OrdersAdmin --> DB
+    Tools -->|eventos| Events[events.js]
+    Events --> Index
+    Index -->|router por rol| Roles
+    Roles -->|notifica| Staff
+    Index -->|aviso de estado| Cliente
 ```
 
----
-
-## 📂 Estructura de Componentes
-
-### 1. [index.js](file:///C:/wamp64/www/mascotiendas/agent/index.js) (Punto de Entrada)
-- Inicializa el cliente de WhatsApp Web utilizando `LocalAuth` para mantener la sesión abierta.
-- Escucha los eventos `message` y `message_create`.
-- Descarga y transcribe notas de voz/audio recibidas utilizando Gemini.
-- Resuelve IDs internos de WhatsApp (`@lid`) a números telefónicos reales (`@c.us`).
-- Ejecuta el bucle de Gemini (`runAgent`) y envía las respuestas al usuario.
-- Escucha los eventos globales `orderCreated` y `orderUpdated` (desde `events.js`) para notificar al administrador en la central (`56920571475@c.us`) con resúmenes claros que muestran los cambios (antiguos vs nuevos).
-
-### 2. [agent.js](file:///C:/wamp64/www/mascotiendas/agent/agent.js) (Motor de Inteligencia Artificial)
-- Configura e invoca el modelo de Gemini.
-- Administra el prompt de sistema y las reglas de personalidad (tono chileno, amable, no vulgar, horario de atención de 09:00 a 20:00 hrs).
-- Expone las funciones de `tools.js` como herramientas de función (Function Calling) de Gemini.
-- Implementa el bucle de razonamiento (Agent Loop) que autoejecuta herramientas secuencialmente hasta formular una respuesta conversacional final.
-
-### 3. [tools.js](file:///C:/wamp64/www/mascotiendas/agent/tools.js) (Herramientas de Base de Datos)
-- **`searchProducts(query, limit)`**: Busca productos activos por coincidencia de palabras clave normalizadas.
-- **`getProductDetails(productId)`**: Recupera información completa de variantes, stock y precios de un producto.
-- **`createOrderFromChat(...)`**: Inserta nuevos pedidos y sus líneas de detalle en la base de datos, calculando subtotales y costos de delivery.
-- **`updateLastOrderDeliveryDetails(clientPhone, fechaDespacho, horaDespacho, notas)`**: Busca el último pedido pendiente del cliente y actualiza sus datos de despacho. Emite el evento `orderUpdated` para alertas.
-
-### 4. [db.js](file:///C:/wamp64/www/mascotiendas/agent/db.js) (Conexión)
-- Exporta un pool de conexiones a la base de datos MariaDB (WAMP, puerto `3308`) utilizando `mysql2/promise`.
-
-### 5. [events.js](file:///C:/wamp64/www/mascotiendas/agent/events.js) (Manejador de Eventos)
-- Un `EventEmitter` compartido en memoria que sincroniza notificaciones asíncronas entre la lógica de negocio (`tools.js`) y la interfaz de WhatsApp (`index.js`).
+Cada mensaje entrante se **serializa por chat** (evita carreras sobre el historial). Si el remitente es un número de staff, entra en *modo gestión*; si no, lo atiende el agente de ventas Max.
 
 ---
 
-## ⚙️ Filtros de Seguridad y Control de Mensajes (Anti-Spam y Anti-Loop)
+## 📂 Componentes
 
-El bot implementa varios filtros críticos en [index.js](file:///C:/wamp64/www/mascotiendas/agent/index.js) para asegurar que solo atienda a clientes válidos, no responda tarde y no caiga en bucles con bots externos:
-
-### 1. Filtro de Contactos Guardados (Solo Chats Nuevos)
-- **Propósito:** Evitar responder a contactos personales guardados en la agenda (familia, amigos, proveedores).
-- **Cómo funciona:** Si la clave `bot_only_respond_to_unknown` en la base de datos es `'1'` (activable mediante el switch en el Panel Admin Dashboard), el bot consulta `contact.isMyContact`. Si es `true`, ignora el mensaje de manera silenciosa.
-- **Excepción del Administrador:** El bot siempre permite mensajes del número administrador configurado en `admin_whatsapp_number` para permitir pruebas operativas, incluso si está guardado en la agenda.
-
-### 2. Filtro de Mensajes Antiguos (Offline)
-- **Propósito:** Impedir que el bot responda con retraso a mensajes acumulados que llegaron mientras estaba apagado.
-- **Cómo funciona:** Se define la constante `startupTime` al arrancar el proceso de Node. Si `message.timestamp < startupTime`, el mensaje se ignora de forma inmediata.
-
-### 3. Filtro de Mensajes Vacíos / Notificaciones
-- **Propósito:** Impedir responder a notificaciones automáticas de WhatsApp Web (cifrado, sincronización, actualizaciones de chats) que se disparan al cargar la página con texto vacío `""`.
-- **Cómo funciona:** Si el cuerpo del mensaje está vacío y no se trata de una nota de voz transcribible (`isAudioMsg` es falso), el bot lo ignora automáticamente.
-
-### 4. Limitador de Bucles (Anti-Bot Loop)
-- **Propósito:** Detener interacciones de ping-pong infinitas si el bot chatea con otro chatbot.
-- **Cómo funciona:** Mantiene un registro en memoria de las respuestas enviadas. Si se superan las 6 respuestas a un mismo chat en el último minuto, el bot pausa sus respuestas para ese remitente durante 15 minutos y envía un mensaje indicándolo.
+| Archivo | Rol |
+|---------|-----|
+| [index.js](index.js) | Orquestador: cliente WhatsApp, filtros, ruteo cliente/staff, notificaciones, salud y scheduler. |
+| [agent.js](agent.js) | Agente Gemini "Max": prompt de personalidad, agent loop, transcripción de audio y `sanitizeAnswer` (red determinista). |
+| [tools.js](tools.js) | Herramientas del agente: búsqueda de productos, detalle, zonas de despacho, historial, y **createOrder con validación de precio/stock server-side**. |
+| [orders-admin.js](orders-admin.js) | Gestión de estados de pedido, listado de accionables, resumen de pedido y mensaje al cliente. |
+| [roles.js](roles.js) | Números por rol, `resolveRole` y **router de notificaciones** por evento (con fallback a admin). |
+| [staff.js](staff.js) | Permisos por rol e interpretación de lenguaje natural de staff (parser de intención + confirmación). |
+| [reports.js](reports.js) | Resumen diario de ventas (clientes nuevos/recurrentes, incompletos, top productos…). |
+| [config-store.js](config-store.js) | `getConfig`/`setConfig` (upsert) sobre la tabla `configuraciones`. |
+| [db.js](db.js) | Pool de conexiones MariaDB (`mysql2/promise`). |
+| [events.js](events.js) | `EventEmitter` compartido (orderCreated / orderUpdated / orderCancelled). |
 
 ---
 
-## 🗄️ Campos Críticos en la Base de Datos (`pedidos`)
+## 🧠 El agente "Max" (cara al cliente)
 
-Para la gestión de despachos, la tabla `pedidos` en la base de datos `mascotiendas` utiliza los siguientes campos clave:
-- `telefono`: Almacena el número del cliente en formato internacional estándar (ej: `+56920571475`).
-- `fecha_despacho`: Almacena el día de entrega (`DATE` o `DATETIME`).
-- `hora_despacho`: Almacena el rango de horario preferido (ej: `12:00`, `11:00 AM`, `15:00 - 17:00`).
-- `notas`: Indicaciones específicas para el repartidor (ej: *"portón negro"*, *"tocar el timbre de madera"*).
-- `estado`: Estado del pedido (`pendiente`, `completado`, etc.).
+Reglas clave del `SYSTEM_PROMPT` ([agent.js](agent.js)):
 
----
+- **Identidad:** se llama **Max**, vendedor humano de Mascotiendas; jamás admite ser IA. "Max" es solo su nombre, nunca se lo dice al cliente.
+- **Tono:** chileno cálido y respetuoso (sin groserías), brevedad máxima (~1 oración), mínimos turnos para cerrar.
+- **Empatía:** baja la energía comercial si la mascota está enferma y **deriva al veterinario** (no diagnostica). Prioriza el bienestar del animal sobre la venta.
+- **Sin relleno:** ejecuta herramientas en silencio (nada de "déjame revisar"), sin disculpas ni exponer el proceso interno.
+- **Precisión:** nunca inventa precios/stock; precios siempre con `$`.
 
-## ⚠️ Errores Comunes y Soluciones (Saber esto evitará dolores de cabeza)
+**Red determinista (`sanitizeAnswer`)** complementa al prompt: elimina "Max" usado como vocativo al cliente, fugas de proceso ("en mi sistema") y normaliza precios. Doble salvaguarda evita respuestas vacías.
 
-### 1. Bloqueo del Perfil de Sesión Puppeteer (`.wwebjs_auth`)
-- **Error**: Al reiniciar el bot abruptamente, a veces el perfil de Chrome queda bloqueado por procesos huérfanos de Chrome. El bot se queda colgado indefinidamente.
-- **Solución**: Asegurarse de cerrar todos los procesos Chrome huérfanos en Windows ejecutando el comando de PowerShell:
-  ```powershell
-  Get-CimInstance Win32_Process -Filter "Name = 'chrome.exe'" | Where-Object { $_.CommandLine -like "*user-data-dir=C:\wamp64*" -or $_.CommandLine -like "*noerrdialogs*" } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
-  ```
-
-### 2. Mensajes No Recibidos tras Reinicios (Mensajes en "Limbo")
-- **Error**: Si el cliente envía un mensaje cuando el bot está apagado o en proceso de carga, dicho mensaje se marca como unread en WhatsApp pero **nunca** gatillará los eventos `.on('message')` o `.on('message_create')` al encender el bot.
-- **Solución**: Para pruebas o uso real, el cliente debe enviar un **mensaje nuevo** cuando el bot ya haya registrado el log de conexión lista (`Mascotiendas Bot está conectado...`).
-
-### 3. Resolución de IDs de WhatsApp `@lid`
-- **Error**: Clientes nuevos o contactos sincronizados en ciertos dispositivos a veces envían mensajes bajo el JID de ID interno (`1234567890@lid`) en lugar del JID con el número telefónico real (`569XXXXXXXX@c.us`). Si se busca en la base de datos usando el ID `@lid`, no se encontrará ningún pedido.
-- **Solución**: Implementamos en `index.js` una evaluación de script dentro del navegador que consulta la API interna de WhatsApp Web:
-  ```javascript
-  const wid = window.require('WAWebWidFactory').createWid(lid);
-  const alt = window.require('WAWebApiContact').getAlternateUserWid(wid);
-  return alt ? alt.toString() : null;
-  ```
-  Esto devuelve el JID `@c.us` real con el número telefónico del cliente para realizar búsquedas exitosas en la base de datos.
-
-### 4. Doble Inicialización / Disparo de Evento `ready` Duplicado
-- **Error**: WhatsApp Web realiza cargas diferidas que a veces disparan múltiples cambios en el estado de sincronización (`hasSynced`). Si se evalúa inmediatamente, el evento `ready` se dispara varias veces.
-- **Solución**: Modificamos el core en `Client.js` de `whatsapp-web.js` para rastrear la inicialización con un flag `syncedCalled`:
-  ```javascript
-  let syncedCalled = false;
-  socket.on('change:hasSynced', () => {
-      if (!syncedCalled) {
-          syncedCalled = true;
-          window.onAppStateHasSyncedEvent();
-      }
-  });
-  ```
-
-### 5. Apagado del Bot por Cancelación de Pasos de Agente (en Entornos Dev)
-- **Error**: En herramientas de desarrollo o consolas de agentes de IA, cada vez que el usuario ingresa un mensaje de respuesta en el chat, el sistema cancela los subprocesos de la consola de comandos de PowerShell activa. Esto apaga el chatbot.
-- **Solución**: Arrancar el bot como un proceso completamente desvinculado del árbol de procesos utilizando WMI (`CIM`). Esto le permite correr de forma persistente y autónoma bajo el servicio del sistema:
-  ```powershell
-  Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = 'cmd.exe /c ""C:\nvm4w\nodejs\node.exe" index.js > chatbot.log 2>&1"'; CurrentDirectory = 'C:\wamp64\www\mascotiendas\agent' }
-  ```
+### Validación de pedidos (createOrder)
+`createOrder` **no confía en los montos del modelo**: recalcula cada precio desde la BD, rechaza productos inactivos/sin stock, revalida el costo de delivery contra la zona, acota el descuento y recomputa el total de forma autoritativa.
 
 ---
 
-## 🚀 Guía de Operación y Monitoreo
+## 👥 Flujo de trabajo multi-rol
 
-### Iniciar el Bot en Modo de Consola (Pruebas Locales)
-Si estás en una terminal interactiva normal y quieres ver el output en tiempo real:
+Equipo separado (ventas / despacho / admin), pago **mixto** (transferencia o efectivo), cada rol con su propio WhatsApp.
+
+### Ciclo de vida del pedido
+
+| Estado | Lo dispara | Notifica a |
+|--------|-----------|-----------|
+| `pendiente` | Max / web (al crear) | 🔔 Ventas |
+| `pagado` | **Ventas** confirma transferencia | 🔔 Despacho (listo para despachar) |
+| `preparando` | **Despacho** | — |
+| `enviado` | **Despacho** | 📲 Cliente ("va en camino") |
+| `entregado` | **Despacho** (cobra efectivo/tarjeta) | 📲 Cliente ("entregado") |
+| `cancelado` | Cliente (vía Max) o staff | 🔔 Ventas + Despacho · 📲 Cliente |
+
+> Pago mixto: la transferencia pasa por `pagado` (verificación previa de Ventas); el efectivo se salta `pagado` y se cobra al `entregar`.
+
+### Permisos por rol ([staff.js](staff.js))
+
+| Rol | Estados que puede fijar | Comandos |
+|-----|------------------------|----------|
+| **admin** | todos | todos |
+| **ventas** | `pagado`, `cancelado` | `!resumen`, `!pendientes`, `!estado`, `!ayuda` |
+| **despacho** | `preparando`, `enviado`, `entregado` | `!pendientes`, `!estado`, `!ayuda` |
+
+### Comandos de staff
+Desde el WhatsApp de cada rol:
+
+- `!estado <id> <nuevo>` — avanza el estado (ej: `!estado 67 enviado`).
+- `!pendientes` — pedidos por gestionar (marca los "sin agendar").
+- `!resumen` / `!reporte` — resumen de ventas del día (admin/ventas).
+- `!roles` / `!setrol <rol> <numero>` — ver/configurar números por rol (admin).
+- `!ayuda` — comandos disponibles según el rol.
+
+### Lenguaje natural (con confirmación)
+El staff también puede escribir natural y Max interpreta y **confirma antes de aplicar**:
+
+```
+Despacho → Max:  salí con el 67
+Max → Despacho:  ¿Marco el pedido #67 como enviado? Responde sí.
+Despacho → Max:  sí
+Max → Despacho:  ✅ Pedido #67 → enviado. 📲 Cliente notificado.
+Max → Cliente:   🚚 Tu pedido #67 ya va en camino. ¡Llega pronto! 🐾
+```
+
+Entiende frases como *"ya entregué el pedido 5"*, *"el cliente pagó la transferencia del 88"*, *"qué pedidos tengo pendientes"*. Las confirmaciones pendientes expiran a los 5 minutos.
+
+---
+
+## 🔔 Router de notificaciones ([roles.js](roles.js))
+
+`recipientsForEvent(evento)` enruta cada evento al rol correspondiente, con **fallback a admin** si el rol no está configurado (no se pierde ningún aviso):
+
+| Evento | Destino |
+|--------|---------|
+| `order_created`, `order_handoff` | ventas |
+| `order_updated`, `order_ready_for_dispatch` | despacho |
+| `order_cancelled` | ventas + despacho |
+| `daily_report`, `bot_health` | admin |
+
+**Aviso al cliente:** antes de enviar, se verifica con `client.getNumberId` que el número esté en WhatsApp (los pedidos web pueden no estarlo); si no, no falla y se informa al staff.
+
+---
+
+## 📊 Resumen diario y 🩺 salud del bot
+
+- **Resumen diario** ([reports.js](reports.js)): se envía al admin a la hora configurada (`admin_daily_report_time`, default 21:00 Chile) con ventas, ticket promedio, clientes nuevos vs recurrentes, pedidos incompletos, anulaciones, carritos abandonados y top productos. Persistencia anti-duplicado tras reinicios. Bajo demanda con `!resumen`.
+- **Salud / uptime**: latido (`bot_last_heartbeat`) cada minuto; al reconectar, si detecta una caída > 5 min, **avisa al admin** ("estuve caído ~X min"). Reconexión automática con backoff y registro de estado en BD.
+
+---
+
+## ⚙️ Filtros de mensajes (anti-spam / anti-loop)
+
+En [index.js](index.js):
+1. **Antigüedad / offline**: ignora mensajes > 10 min o anteriores al encendido (`startupTime`).
+2. **Grupos / difusión**: solo chats individuales.
+3. **Contactos guardados**: si `bot_only_respond_to_unknown = '1'`, ignora la agenda (excepto staff).
+4. **Vacíos**: ignora notificaciones de sistema sin texto (salvo notas de voz, que se transcriben).
+5. **Anti-bucle**: > 6 respuestas/min al mismo chat → pausa 15 min.
+6. **Handoff**: chats derivados a humano quedan en silencio `bot_handoff_pause_hours` (default 3h).
+7. **Purga de memoria**: el estado en memoria de chats inactivos se descarta tras 6h.
+
+---
+
+## 🗄️ Configuración (tabla `configuraciones`, clave/valor)
+
+| Clave | Descripción |
+|-------|-------------|
+| `admin_whatsapp_number` | Número del administrador (fallback de todos los avisos). |
+| `ventas_whatsapp_number` | Número del encargado de ventas. |
+| `despacho_whatsapp_number` | Número del encargado de despacho. |
+| `bot_whatsapp_number` | Número del bot (para mensajes de error). |
+| `bot_only_respond_to_unknown` | `'1'`/`'0'`: responder solo a no-contactos. |
+| `bot_handoff_pause_hours` | Horas de silencio tras una derivación (default 3). |
+| `admin_daily_report_time` | Hora `HH:MM` del resumen diario (default `21:00`). |
+| `admin_daily_report_last` | (interno) última fecha enviada, anti-duplicado. |
+| `bot_status`, `bot_last_heartbeat`, `bot_offline_since`, `bot_auth_failure_at` | (internos) telemetría de salud. |
+
+Configurar los roles desde WhatsApp (admin): `!setrol ventas 569XXXXXXXX` · `!setrol despacho 569YYYYYYYY`.
+
+---
+
+## 🚀 Operación
+
+### Iniciar (consola, ver output en vivo)
 ```bash
 node index.js
 ```
 
-### Iniciar el Bot en Segundo Plano Persistente (Producción/Testing Desvinculado)
-Para evitar que se apague al interactuar con herramientas del desarrollador:
+### Iniciar en segundo plano persistente (producción)
+Para que no se apague al interactuar con herramientas de desarrollo:
 ```powershell
 Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = 'cmd.exe /c ""C:\nvm4w\nodejs\node.exe" index.js > chatbot.log 2>&1"'; CurrentDirectory = 'C:\wamp64\www\mascotiendas\agent' }
 ```
 
-### Ver el Estado de Ejecución
-Para saber si el bot está corriendo y cuál es su ID de proceso en Windows:
+### Monitorear / detener
 ```powershell
-Get-Process node -ErrorAction SilentlyContinue | Select-Object Id, ProcessName, StartTime
+Get-Content -Path "chatbot.log" -Wait -Tail 20      # logs en vivo
+Get-Process node | Select-Object Id, StartTime       # estado
+Stop-Process -Name node -Force                       # detener
 ```
 
-### Monitorear Logs en Tiempo Real
-Para ver los mensajes recibidos, respuestas enviadas, y llamadas a base de datos en tiempo real:
-```powershell
-Get-Content -Path "chatbot.log" -Wait -Tail 20
+---
+
+## 🧪 Pruebas
+
+Suite de regresión (en [tests/](tests)):
+
+```bash
+npm test            # stress-test conversacional del agente (usa Gemini)
+npm run test:unit   # sanitizer + formato de precio
+npm run test:report # resumen diario
+npm run test:health # salud / uptime y config-store
+npm run test:roles  # roles y router de notificaciones
+npm run test:staff  # permisos + parser NL + flujo de gestión
+npm run test:orders # gestión de estados + mensaje al cliente
 ```
 
-### Detener el Bot
-Busca el ID del proceso `node` y finalízalo:
+Salvo `npm test` (que llama a Gemini), las demás corren contra la BD local en segundos.
+
+---
+
+## ⚠️ Errores comunes
+
+### 1. Perfil de sesión bloqueado (`.wwebjs_auth`)
+Procesos Chrome huérfanos dejan el perfil bloqueado y el bot se cuelga. Cerrarlos:
 ```powershell
-Stop-Process -Name node -Force
+Get-CimInstance Win32_Process -Filter "Name = 'chrome.exe'" | Where-Object { $_.CommandLine -like "*user-data-dir=C:\wamp64*" } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
 ```
-*(Nota: Asegúrate también de correr el comando de eliminación de procesos Chrome huérfanos listados en la sección de errores comunes).*
+
+### 2. Mensajes en "limbo" tras reinicios
+Un mensaje enviado mientras el bot estaba apagado **no** gatilla los eventos al encender. El cliente debe enviar un **mensaje nuevo** una vez que aparezca `✅ ¡Mascotiendas Bot está conectado...`.
+
+### 3. IDs `@lid`
+Algunos clientes envían bajo el JID interno `@lid` en vez de `@c.us`. [index.js](index.js) resuelve el número real evaluando `getAlternateUserWid` dentro del navegador.
+
+### 4. Números de staff no son clientes
+Un número configurado como ventas/despacho/admin entra en *modo gestión*: **no** recibe atención de ventas. Para probar el agente de ventas, usar un número distinto.
+
+### 5. El bot no responde a un staff por lenguaje natural
+Si Max no entendió, responde pidiendo aclaración. Usar el comando exacto `!estado <id> <estado>` como vía segura, o `!ayuda`.
+
+---
+
+## 🗃️ Campos clave de `pedidos`
+
+- `telefono`: formato internacional (`+56920571475`).
+- `estado`: `pendiente · pagado · preparando · enviado · entregado · cancelado`.
+- `fecha_despacho` / `hora_despacho`: agendamiento del despacho.
+- `notas`: indicaciones para el repartidor.
+- `metodo_entrega`: `delivery` / `retiro`.
