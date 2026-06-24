@@ -6,8 +6,9 @@ import { runAgent, transcribeAudio } from './agent.js';
 import { orderEvents } from './events.js';
 import { buildDailyReport } from './reports.js';
 import { getConfig, setConfig } from './config-store.js';
-import { updateOrderStatus, listActionableOrders, formatActionableOrders, ESTADOS_VALIDOS } from './orders-admin.js';
-import { recipientsForEvent, listRoleConfig, setRoleNumber, ROLES } from './roles.js';
+import { updateOrderStatus, listActionableOrders, formatActionableOrders, getOrderSummary, ESTADOS_VALIDOS } from './orders-admin.js';
+import { recipientsForEvent, listRoleConfig, setRoleNumber, resolveRole, ROLES } from './roles.js';
+import { canRunCommand, canSetEstado, isAffirmation, isNegation, parseStaffIntent } from './staff.js';
 import pool from './db.js';
 
 // Envía un mensaje a todos los destinatarios que correspondan a un tipo de evento (ruteo por rol).
@@ -21,6 +22,129 @@ async function notifyRecipients(eventType, messageText) {
     }
   }
   return jids;
+}
+
+// Texto de ayuda de comandos adaptado al rol que pregunta
+function staffHelp(role) {
+  const lines = ['🛠️ *Comandos disponibles*', ''];
+  if (canRunCommand(role, '!resumen')) lines.push('*!resumen* — ventas del día');
+  if (canRunCommand(role, '!pendientes')) lines.push('*!pendientes* — pedidos por gestionar');
+  if (canRunCommand(role, '!estado')) lines.push('*!estado <id> <estado>* — cambiar estado de un pedido');
+  if (canRunCommand(role, '!roles')) lines.push('*!roles* — ver números por rol');
+  if (canRunCommand(role, '!setrol')) lines.push('*!setrol <rol> <numero>* — configurar un rol');
+  const permitidos = ESTADOS_VALIDOS.filter(e => canSetEstado(role, e));
+  lines.push('', `También puedes escribir natural, ej: _"salí con el 67"_ y te pido confirmación.`);
+  if (permitidos.length) lines.push(`Estados que puedes fijar: ${permitidos.join(' / ')}`);
+  return lines.join('\n');
+}
+
+// Aplica un cambio de estado y dispara las cascadas correspondientes
+async function applyStatusChange(message, orderId, estado, role) {
+  const res = await updateOrderStatus(orderId, estado);
+  await message.reply(res.message);
+  if (!res.success) return res;
+  console.log(`[Staff:${role}] ${res.message.replace(/\*|_/g, '')}`);
+
+  // Cascada: al confirmar el pago (transferencia), avisar a despacho que el pedido quedó listo
+  if (estado === 'pagado') {
+    try {
+      const o = await getOrderSummary(res.orderId);
+      if (o) {
+        const f = o.fecha_despacho
+          ? (o.fecha_despacho instanceof Date ? o.fecha_despacho.toISOString().slice(0, 10) : String(o.fecha_despacho).slice(0, 10))
+          : 'sin agendar';
+        const aviso = `📦 *PEDIDO LISTO PARA DESPACHAR (#${o.id})*\n\n👤 ${o.nombre_cliente}\n📍 ${o.direccion}, ${o.ciudad}\n📅 ${f} ${o.hora_despacho || ''}\n📝 ${o.notas || 'Sin notas'}\n🛒 ${o.productos || ''}`;
+        await notifyRecipients('order_ready_for_dispatch', aviso);
+        console.log(`[Staff] Pedido #${o.id} avisado a despacho (listo para despachar).`);
+      }
+    } catch (e) {
+      console.error('[Staff] Error avisando a despacho:', e);
+    }
+  }
+  // (Fase C añadirá: enviado/entregado/cancelado -> notificar al cliente)
+  return res;
+}
+
+// Atiende a un número de staff: comandos explícitos o lenguaje natural con confirmación
+async function handleStaffMessage(message, chatId, clientPhone, role, body) {
+  try {
+    // 1) Comandos explícitos (!...)
+    if (body.startsWith('!')) {
+      const parts = body.trim().split(/\s+/);
+      const cmd = parts[0].toLowerCase();
+      if (!canRunCommand(role, cmd)) {
+        await message.reply(`🔒 Tu rol (*${role}*) no puede usar *${cmd}*.`);
+        return;
+      }
+      if (cmd === '!resumen' || cmd === '!reporte') {
+        await message.reply(await buildDailyReport());
+      } else if (cmd === '!pendientes') {
+        await message.reply(formatActionableOrders(await listActionableOrders(15)));
+      } else if (cmd === '!estado') {
+        if (parts.length < 3) {
+          await message.reply(`Uso: *!estado <id> <nuevo>*\nEstados: ${ESTADOS_VALIDOS.join(' / ')}`);
+        } else if (!canSetEstado(role, parts[2])) {
+          await message.reply(`🔒 Tu rol (*${role}*) no puede marcar *${parts[2].toLowerCase()}*.`);
+        } else {
+          await applyStatusChange(message, parts[1], parts[2].toLowerCase(), role);
+        }
+      } else if (cmd === '!roles') {
+        const cfg = await listRoleConfig();
+        const lineas = ROLES.map(r => `*${r}:* ${cfg[r] ? '+' + cfg[r] : '_(sin configurar)_'}`).join('\n');
+        await message.reply(`👥 *Números por rol*\n\n${lineas}\n\nCambiar: *!setrol <rol> <numero>*`);
+      } else if (cmd === '!setrol') {
+        if (parts.length < 3) {
+          await message.reply(`Uso: *!setrol <rol> <numero>*\nRoles: ${ROLES.join(' / ')}`);
+        } else {
+          const r = await setRoleNumber(parts[1].toLowerCase(), parts[2]);
+          await message.reply(r.message);
+          if (r.success) console.log(`[Admin] Rol ${r.role} -> +${r.numero}`);
+        }
+      } else {
+        await message.reply(staffHelp(role));
+      }
+      return;
+    }
+
+    // 2) ¿Hay una acción pendiente de confirmación por lenguaje natural?
+    const pend = pendingStaffActions.get(chatId);
+    if (pend && Date.now() < pend.expiresAt) {
+      if (isAffirmation(body)) {
+        pendingStaffActions.delete(chatId);
+        await applyStatusChange(message, pend.orderId, pend.estado, role);
+        return;
+      }
+      if (isNegation(body)) {
+        pendingStaffActions.delete(chatId);
+        await message.reply('Listo, no apliqué ningún cambio. 👍');
+        return;
+      }
+      // si no fue sí/no, seguimos e intentamos reinterpretar el mensaje
+    }
+
+    // 3) Interpretar la intención en lenguaje natural
+    const intent = parseStaffIntent(body);
+    if (intent.action === 'set_status') {
+      if (!canSetEstado(role, intent.estado)) {
+        await message.reply(`🔒 Tu rol (*${role}*) no puede marcar *${intent.estado}*.`);
+        return;
+      }
+      pendingStaffActions.set(chatId, { orderId: intent.orderId, estado: intent.estado, expiresAt: Date.now() + STAFF_CONFIRM_TTL_MS });
+      await message.reply(`¿Marco el pedido *#${intent.orderId}* como *${intent.estado}*? Responde *sí* para confirmar.`);
+    } else if (intent.action === 'need_id') {
+      await message.reply(`¿Para qué número de pedido? Dime el ID, ej: *!estado 67 ${intent.estado}*.`);
+    } else if (intent.action === 'list') {
+      await message.reply(formatActionableOrders(await listActionableOrders(15)));
+    } else if (intent.action === 'summary') {
+      if (canRunCommand(role, '!resumen')) await message.reply(await buildDailyReport());
+      else await message.reply(`🔒 Tu rol (*${role}*) no puede ver el resumen.`);
+    } else {
+      await message.reply(`No te entendí. Usa *!estado <id> <estado>* o dime algo como _"salí con el 67"_. Escribe *!ayuda* para ver opciones.`);
+    }
+  } catch (e) {
+    console.error(`[Staff:${role}] Error procesando mensaje:`, e);
+    try { await message.reply('⚠️ Ocurrió un error procesando tu mensaje. Revisa el log del bot.'); } catch (_) {}
+  }
 }
 
 dotenv.config();
@@ -110,6 +234,11 @@ const escalatedChats = new Map();
 
 // Tiempo de inactividad tras el cual se descarta el estado en memoria de un chat (6 horas)
 const CHAT_IDLE_TTL_MS = 6 * 60 * 60 * 1000;
+
+// Acciones de staff (cambios de estado por lenguaje natural) pendientes de confirmar
+// Clave: chatId, Valor: { orderId, estado, expiresAt }
+const pendingStaffActions = new Map();
+const STAFF_CONFIRM_TTL_MS = 5 * 60 * 1000;
 
 // Límite de mensajes guardados en el historial para evitar saturar el contexto de la IA
 const MAX_HISTORY_LENGTH = 20;
@@ -418,70 +547,12 @@ async function handleMessage(message) {
       console.warn('[Phone] Error obteniendo contacto, usando fallback:', clientPhone);
     }
 
-    // ── Comandos de administrador (solo el número admin) ──
-    // Si el remitente NO es admin, NO interceptamos: el mensaje sigue al agente como uno normal.
-    if (messageBody.startsWith('!')) {
-      const adminJid = await getAdminJid();
-      const adminPhone = adminJid.replace('@c.us', '');
-      const senderLast9 = clientPhone.replace(/\D/g, '').slice(-9);
-      const esAdmin = senderLast9 && adminPhone.slice(-9) === senderLast9;
-
-      if (esAdmin) {
-        const parts = messageBody.trim().split(/\s+/);
-        const cmd = parts[0].toLowerCase();
-        try {
-          if (cmd === '!resumen' || cmd === '!reporte') {
-            await client.sendMessage(adminJid, await buildDailyReport());
-            console.log('[Admin] Resumen diario enviado bajo demanda.');
-
-          } else if (cmd === '!pendientes') {
-            const rows = await listActionableOrders(15);
-            await client.sendMessage(adminJid, formatActionableOrders(rows));
-            console.log(`[Admin] Listado de pedidos por gestionar enviado (${rows.length}).`);
-
-          } else if (cmd === '!estado') {
-            if (parts.length < 3) {
-              await message.reply(`Uso: *!estado <id> <nuevo>*\nEstados: ${ESTADOS_VALIDOS.join(' / ')}`);
-            } else {
-              const res = await updateOrderStatus(parts[1], parts[2]);
-              await message.reply(res.message);
-              if (res.success) console.log(`[Admin] ${res.message.replace(/\*|_/g, '')}`);
-            }
-
-          } else if (cmd === '!roles') {
-            const cfg = await listRoleConfig();
-            const lineas = ROLES.map(r => `*${r}:* ${cfg[r] ? '+' + cfg[r] : '_(sin configurar)_'}`).join('\n');
-            await message.reply(`👥 *Números por rol*\n\n${lineas}\n\nCambiar: *!setrol <rol> <numero>*`);
-
-          } else if (cmd === '!setrol') {
-            if (parts.length < 3) {
-              await message.reply(`Uso: *!setrol <rol> <numero>*\nRoles: ${ROLES.join(' / ')}`);
-            } else {
-              const res = await setRoleNumber(parts[1].toLowerCase(), parts[2]);
-              await message.reply(res.message);
-              if (res.success) console.log(`[Admin] Rol ${res.role} -> +${res.numero}`);
-            }
-
-          } else if (cmd === '!ayuda' || cmd === '!comandos') {
-            await message.reply(
-              `🛠️ *Comandos de administrador*\n\n` +
-              `*!resumen* — resumen de ventas del día\n` +
-              `*!pendientes* — pedidos por gestionar\n` +
-              `*!estado <id> <nuevo>* — cambiar estado de un pedido\n` +
-              `   (${ESTADOS_VALIDOS.join(' / ')})\n` +
-              `*!roles* — ver números por rol\n` +
-              `*!setrol <rol> <numero>* — configurar el número de un rol`
-            );
-
-          } else {
-            await message.reply(`Comando no reconocido. Escribe *!ayuda* para ver los disponibles.`);
-          }
-        } catch (e) {
-          console.error(`[Admin] Error ejecutando '${cmd}':`, e);
-          await message.reply('⚠️ Ocurrió un error ejecutando el comando. Revisa el log del bot.');
-        }
-        return;
-      }
+    // ── Flujo de STAFF (admin / ventas / despacho) ──
+    // Si el remitente es un número de staff, lo atendemos en modo gestión (no como cliente).
+    const senderRole = await resolveRole(clientPhone);
+    if (senderRole) {
+      await handleStaffMessage(message, chatId, clientPhone, senderRole, messageBody);
+      return;
     }
 
     // Filtrar si está configurado para responder solo a chats nuevos (desconocidos)

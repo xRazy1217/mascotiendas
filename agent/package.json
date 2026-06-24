@@ -11,7 +11,8 @@
     "test:report": "node tests/test-report.js",
     "test:health": "node tests/test-health.js",
     "test:orders": "node tests/test-orders-admin.js",
-    "test:roles": "node tests/test-roles.js"
+    "test:roles": "node tests/test-roles.js",
+    "test:staff": "node tests/test-staff.js && node tests/test-staff-flow.js"
   },
   "dependencies": {
     "@google/generative-ai": "^0.11.0",

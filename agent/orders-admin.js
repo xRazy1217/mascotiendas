@@ -50,6 +50,23 @@ export async function updateOrderStatus(orderId, nuevoEstado) {
 }
 
 /**
+ * Devuelve el detalle de un pedido para armar avisos (a despacho o al cliente).
+ * @param {number} orderId
+ * @returns {Promise<object|null>}
+ */
+export async function getOrderSummary(orderId) {
+  const [rows] = await pool.execute(
+    `SELECT p.id, p.nombre_cliente, p.telefono, p.direccion, p.ciudad, p.total, p.estado,
+            p.metodo_entrega, p.fecha_despacho, p.hora_despacho, p.notas,
+            (SELECT GROUP_CONCAT(CONCAT(pi.cantidad, 'x ', pi.nombre) SEPARATOR ', ')
+               FROM pedido_items pi WHERE pi.pedido_id = p.id) AS productos
+       FROM pedidos p WHERE p.id = ?`,
+    [Number(orderId)]
+  );
+  return rows.length > 0 ? rows[0] : null;
+}
+
+/**
  * Lista los pedidos que requieren gestión (aún no enviados/entregados/cancelados).
  * @param {number} [limit=10]
  */
