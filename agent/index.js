@@ -7,7 +7,21 @@ import { orderEvents } from './events.js';
 import { buildDailyReport } from './reports.js';
 import { getConfig, setConfig } from './config-store.js';
 import { updateOrderStatus, listActionableOrders, formatActionableOrders, ESTADOS_VALIDOS } from './orders-admin.js';
+import { recipientsForEvent, listRoleConfig, setRoleNumber, ROLES } from './roles.js';
 import pool from './db.js';
+
+// Envía un mensaje a todos los destinatarios que correspondan a un tipo de evento (ruteo por rol).
+async function notifyRecipients(eventType, messageText) {
+  const jids = await recipientsForEvent(eventType);
+  for (const jid of jids) {
+    try {
+      await client.sendMessage(jid, messageText);
+    } catch (e) {
+      console.error(`[Notif] Error enviando '${eventType}' a ${jid}:`, e.message);
+    }
+  }
+  return jids;
+}
 
 dotenv.config();
 
@@ -434,13 +448,29 @@ async function handleMessage(message) {
               if (res.success) console.log(`[Admin] ${res.message.replace(/\*|_/g, '')}`);
             }
 
+          } else if (cmd === '!roles') {
+            const cfg = await listRoleConfig();
+            const lineas = ROLES.map(r => `*${r}:* ${cfg[r] ? '+' + cfg[r] : '_(sin configurar)_'}`).join('\n');
+            await message.reply(`👥 *Números por rol*\n\n${lineas}\n\nCambiar: *!setrol <rol> <numero>*`);
+
+          } else if (cmd === '!setrol') {
+            if (parts.length < 3) {
+              await message.reply(`Uso: *!setrol <rol> <numero>*\nRoles: ${ROLES.join(' / ')}`);
+            } else {
+              const res = await setRoleNumber(parts[1].toLowerCase(), parts[2]);
+              await message.reply(res.message);
+              if (res.success) console.log(`[Admin] Rol ${res.role} -> +${res.numero}`);
+            }
+
           } else if (cmd === '!ayuda' || cmd === '!comandos') {
             await message.reply(
               `🛠️ *Comandos de administrador*\n\n` +
               `*!resumen* — resumen de ventas del día\n` +
               `*!pendientes* — pedidos por gestionar\n` +
               `*!estado <id> <nuevo>* — cambiar estado de un pedido\n` +
-              `   (${ESTADOS_VALIDOS.join(' / ')})`
+              `   (${ESTADOS_VALIDOS.join(' / ')})\n` +
+              `*!roles* — ver números por rol\n` +
+              `*!setrol <rol> <numero>* — configurar el número de un rol`
             );
 
           } else {
@@ -505,13 +535,12 @@ async function handleMessage(message) {
     // Enviar respuesta al cliente
     await message.reply(safeAnswer);
 
-    // Si el agente derivó el caso a un humano: notificar al admin con contexto y silenciar el bot
+    // Si el agente derivó el caso a un humano: notificar a ventas con contexto y silenciar el bot
     if (agentResponse.escalation) {
       try {
         const pauseHours = await getHandoffPauseHours();
         escalatedChats.set(chatId, Date.now() + pauseHours * 60 * 60 * 1000);
 
-        const adminJid = await getAdminJid();
         const rawPhone = String(clientPhone).replace(/\D/g, '');
         const cleanPhone = rawPhone.startsWith('56') && rawPhone.length >= 11
           ? rawPhone
@@ -526,10 +555,10 @@ async function handleMessage(message) {
 
 El bot quedó en silencio en este chat por ${pauseHours}h para que lo atiendas. Escríbele directamente al cliente.`;
 
-        await client.sendMessage(adminJid, aviso);
-        console.log(`[Handoff] Chat ${chatId} derivado a humano. Bot en silencio ${pauseHours}h. Admin notificado.`);
+        const jids = await notifyRecipients('order_handoff', aviso);
+        console.log(`[Handoff] Chat ${chatId} derivado a humano. Bot en silencio ${pauseHours}h. Ventas notificado (${jids.length}).`);
       } catch (escErr) {
-        console.error('[Handoff] Error al notificar la derivación al administrador:', escErr);
+        console.error('[Handoff] Error al notificar la derivación:', escErr);
       }
     }
 
@@ -563,11 +592,9 @@ El bot quedó en silencio en este chat por ${pauseHours}h para que lo atiendas. 
   }
 }
 
-// Escuchar evento de creación de pedidos para notificar a la central
+// Escuchar evento de creación de pedidos para notificar al rol de ventas
 orderEvents.on('orderCreated', async (order) => {
   try {
-    const centralJid = await getAdminJid();
-    
     // Formatear los ítems en una lista legible
     const itemsList = order.items
       ? order.items.map(item => `- *${item.cantidad}x* ${item.nombre} (_$${item.precio.toLocaleString('es-CL')}_)`).join('\n')
@@ -600,19 +627,16 @@ ${itemsList}
 💵 *Descuento:* $${(order.descuento || 0).toLocaleString('es-CL')}
 Total: *$${(order.total || 0).toLocaleString('es-CL')}*`;
 
-    console.log(`[Notificación Central] Enviando detalles del pedido #${order.orderId} al número central...`);
-    await client.sendMessage(centralJid, notificationMessage);
-    console.log(`[Notificación Central] Mensaje enviado exitosamente a la central.`);
+    const jids = await notifyRecipients('order_created', notificationMessage);
+    console.log(`[Notificación] Nuevo pedido #${order.orderId} avisado a ventas (${jids.length} destinatario/s).`);
   } catch (error) {
-    console.error('❌ Error al enviar notificación a la central:', error);
+    console.error('❌ Error al notificar el nuevo pedido:', error);
   }
 });
 
-// Escuchar evento de actualización de pedidos para notificar al administrador
+// Escuchar evento de actualización de pedidos para notificar al rol de despacho
 orderEvents.on('orderUpdated', async (update) => {
   try {
-    const centralJid = await getAdminJid();
-    
     // Normalizar el teléfono para mostrar como +56XXXXXXXXX
     const rawPhone = String(update.clientPhone).replace(/\D/g, '');
     const cleanPhone = rawPhone.startsWith('56') && rawPhone.length >= 11
@@ -668,19 +692,16 @@ orderEvents.on('orderUpdated', async (update) => {
 *Modificaciones realizadas:*
 ${changes.join('\n')}`;
 
-    console.log(`[Notificación Central] Enviando actualización del pedido #${update.orderId} al número central...`);
-    await client.sendMessage(centralJid, notificationMessage);
-    console.log(`[Notificación Central] Mensaje de actualización enviado exitosamente a la central.`);
+    const jids = await notifyRecipients('order_updated', notificationMessage);
+    console.log(`[Notificación] Actualización del pedido #${update.orderId} avisada a despacho (${jids.length} destinatario/s).`);
   } catch (error) {
-    console.error('❌ Error al enviar notificación de actualización a la central:', error);
+    console.error('❌ Error al notificar la actualización del pedido:', error);
   }
 });
 
-// Escuchar evento de anulación de pedidos para notificar al administrador
+// Escuchar evento de anulación de pedidos para notificar a ventas y despacho
 orderEvents.on('orderCancelled', async (order) => {
   try {
-    const centralJid = await getAdminJid();
-
     // Normalizar el teléfono para mostrar como +56XXXXXXXXX
     const rawPhone = String(order.clientPhone).replace(/\D/g, '');
     const cleanPhone = rawPhone.startsWith('56') && rawPhone.length >= 11
@@ -697,11 +718,10 @@ orderEvents.on('orderCancelled', async (order) => {
 
 El cliente ha solicitado la anulación de este pedido directamente desde el chat de WhatsApp.`;
 
-    console.log(`[Notificación Central] Enviando anulación del pedido #${order.orderId} al número central...`);
-    await client.sendMessage(centralJid, notificationMessage);
-    console.log(`[Notificación Central] Mensaje de anulación enviado exitosamente a la central.`);
+    const jids = await notifyRecipients('order_cancelled', notificationMessage);
+    console.log(`[Notificación] Anulación del pedido #${order.orderId} avisada a ventas y despacho (${jids.length} destinatario/s).`);
   } catch (error) {
-    console.error('❌ Error al enviar notificación de anulación a la central:', error);
+    console.error('❌ Error al notificar la anulación del pedido:', error);
   }
 });
 
