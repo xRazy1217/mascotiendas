@@ -4,6 +4,7 @@ import qrcode from 'qrcode-terminal';
 import dotenv from 'dotenv';
 import { runAgent, transcribeAudio } from './agent.js';
 import { orderEvents } from './events.js';
+import { buildDailyReport } from './reports.js';
 import pool from './db.js';
 
 dotenv.config();
@@ -290,6 +291,26 @@ client.on('message', async (message) => {
       console.warn('[Phone] Error obteniendo contacto, usando fallback:', clientPhone);
     }
 
+    // Comando de administrador: resumen de ventas del día bajo demanda (útil para pruebas)
+    if (messageBody.toLowerCase() === '!resumen' || messageBody.toLowerCase() === '!reporte') {
+      const adminJid = await getAdminJid();
+      const adminPhone = adminJid.replace('@c.us', '');
+      const senderLast9 = clientPhone.replace(/\D/g, '').slice(-9);
+      if (senderLast9 && adminPhone.slice(-9) === senderLast9) {
+        try {
+          const report = await buildDailyReport();
+          await client.sendMessage(adminJid, report);
+          console.log('[Resumen] Reporte diario enviado al admin bajo demanda.');
+        } catch (e) {
+          console.error('[Resumen] Error generando el reporte bajo demanda:', e);
+          await message.reply('⚠️ No pude generar el resumen ahora. Revisa el log del bot.');
+        }
+      } else {
+        console.log(`[Resumen] Comando !resumen ignorado: ${clientPhone} no es el administrador.`);
+      }
+      return;
+    }
+
     // Filtrar si está configurado para responder solo a chats nuevos (desconocidos)
     const onlyRespondToUnknown = await getOnlyRespondToUnknown();
     if (onlyRespondToUnknown) {
@@ -332,8 +353,14 @@ client.on('message', async (message) => {
 
     console.log(`[Respuesta Preparada] Hacia: ${chatId} | Texto: "${agentResponse.answer}"`);
 
+    // Salvaguarda final: nunca enviar un mensaje vacío a WhatsApp (message.reply('') falla o
+    // manda un globo en blanco). Si el agente devolvió vacío, usamos un texto de aclaración.
+    const safeAnswer = (agentResponse.answer && agentResponse.answer.trim())
+      ? agentResponse.answer
+      : '¿Me cuentas un poquito más para ayudarte? ¿Es para perro o gato? 🐾';
+
     // Enviar respuesta al cliente
-    await message.reply(agentResponse.answer);
+    await message.reply(safeAnswer);
 
     // Actualizar el historial en memoria con el nuevo flujo retornado por el agente
     let updatedHistory = agentResponse.history;
@@ -551,6 +578,67 @@ landingBypassInterval = setInterval(async () => {
     }
   }
 }, 10000);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Resumen diario automático de ventas al administrador
+// ─────────────────────────────────────────────────────────────────────────────
+let lastReportSentDate = null;
+
+// Hora objetivo de envío (config 'admin_daily_report_time', formato HH:MM, default 21:00)
+async function getDailyReportTime() {
+  try {
+    const [rows] = await pool.execute("SELECT valor FROM configuraciones WHERE clave = 'admin_daily_report_time'");
+    if (rows.length > 0 && rows[0].valor && /^\d{1,2}:\d{2}$/.test(rows[0].valor.trim())) {
+      return rows[0].valor.trim().padStart(5, '0');
+    }
+  } catch (err) {
+    console.error('Error al consultar admin_daily_report_time:', err);
+  }
+  return '21:00';
+}
+
+// Fecha y hora actuales en Chile como { date: 'YYYY-MM-DD', hm: 'HH:MM' }
+function chileNowParts() {
+  const fmt = new Intl.DateTimeFormat('es-CL', {
+    timeZone: 'America/Santiago', year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', hour12: false
+  });
+  const p = {};
+  fmt.formatToParts(new Date()).forEach(x => p[x.type] = x.value);
+  return { date: `${p.year}-${p.month}-${p.day}`, hm: `${p.hour}:${p.minute}` };
+}
+
+// Cargar la última fecha enviada desde la BD para no duplicar el resumen tras un reinicio
+(async () => {
+  try {
+    const [rows] = await pool.execute("SELECT valor FROM configuraciones WHERE clave = 'admin_daily_report_last'");
+    if (rows.length > 0 && rows[0].valor) lastReportSentDate = rows[0].valor.trim();
+  } catch (err) {
+    console.error('Error al cargar admin_daily_report_last:', err);
+  }
+})();
+
+// Revisar cada minuto si corresponde enviar el resumen del día
+setInterval(async () => {
+  try {
+    const { date, hm } = chileNowParts();
+    if (lastReportSentDate === date) return; // ya se envió hoy
+    const target = await getDailyReportTime();
+    if (hm >= target) {
+      const adminJid = await getAdminJid();
+      const report = await buildDailyReport();
+      await client.sendMessage(adminJid, report);
+      lastReportSentDate = date;
+      await pool.execute(
+        "INSERT INTO configuraciones (clave, valor) VALUES ('admin_daily_report_last', ?) ON DUPLICATE KEY UPDATE valor = ?",
+        [date, date]
+      );
+      console.log(`[Resumen Diario] Enviado al administrador a las ${hm} (objetivo ${target}).`);
+    }
+  } catch (err) {
+    console.error('[Resumen Diario] Error en el scheduler:', err);
+  }
+}, 60000);
 
 // Iniciar conexión
 client.initialize();
