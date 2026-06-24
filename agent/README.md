@@ -42,6 +42,7 @@ Cada mensaje entrante se **serializa por chat** (evita carreras sobre el histori
 | [staff.js](staff.js) | Permisos por rol e interpretación de lenguaje natural de staff (parser de intención + confirmación). |
 | [reports.js](reports.js) | Resumen diario de ventas (clientes nuevos/recurrentes, incompletos, top productos…). |
 | [config-store.js](config-store.js) | `getConfig`/`setConfig` (upsert) sobre la tabla `configuraciones`. |
+| [history-store.js](history-store.js) | Persistencia del historial de conversación en la tabla `bot_historial` (sobrevive reinicios). |
 | [db.js](db.js) | Pool de conexiones MariaDB (`mysql2/promise`). |
 | [events.js](events.js) | `EventEmitter` compartido (orderCreated / orderUpdated / orderCancelled). |
 
@@ -146,6 +147,8 @@ En [index.js](index.js):
 6. **Handoff**: chats derivados a humano quedan en silencio `bot_handoff_pause_hours` (default 3h).
 7. **Purga de memoria**: el estado en memoria de chats inactivos se descarta tras 6h.
 
+> **Historial persistente:** la conversación de cada chat se guarda en la tabla `bot_historial`, así que **sobrevive a los reinicios** del bot (al recibir un mensaje, si no está en memoria se carga de la BD). Se borra con `!reiniciar` y se purgan filas sin actividad en 30 días. Para no leer config en cada mensaje, los números por rol se cachean en memoria 60s (se invalidan al usar `!setrol`).
+
 ---
 
 ## 🗄️ Configuración (tabla `configuraciones`, clave/valor)
@@ -200,6 +203,7 @@ npm run test:health # salud / uptime y config-store
 npm run test:roles  # roles y router de notificaciones
 npm run test:staff  # permisos + parser NL + flujo de gestión
 npm run test:orders # gestión de estados + mensaje al cliente
+npm run test:history # persistencia del historial de conversación
 ```
 
 Salvo `npm test` (que llama a Gemini), las demás corren contra la BD local en segundos.
@@ -215,7 +219,7 @@ Get-CimInstance Win32_Process -Filter "Name = 'chrome.exe'" | Where-Object { $_.
 ```
 
 ### 2. Mensajes en "limbo" tras reinicios
-Un mensaje enviado mientras el bot estaba apagado **no** gatilla los eventos al encender. El cliente debe enviar un **mensaje nuevo** una vez que aparezca `✅ ¡Mascotiendas Bot está conectado...`.
+Un mensaje enviado mientras el bot estaba apagado **no** gatilla los eventos al encender. El cliente debe enviar un **mensaje nuevo** una vez que aparezca `✅ ¡Mascotiendas Bot está conectado...`. (El *contexto* de la conversación sí se conserva: el historial se guarda en `bot_historial` y se recupera al volver.)
 
 ### 3. IDs `@lid`
 Algunos clientes envían bajo el JID interno `@lid` en vez de `@c.us`. [index.js](index.js) resuelve el número real evaluando `getAlternateUserWid` dentro del navegador.
