@@ -6,6 +6,7 @@ import { runAgent, transcribeAudio } from './agent.js';
 import { orderEvents } from './events.js';
 import { buildDailyReport } from './reports.js';
 import { getConfig, setConfig } from './config-store.js';
+import { updateOrderStatus, listActionableOrders, formatActionableOrders, ESTADOS_VALIDOS } from './orders-admin.js';
 import pool from './db.js';
 
 dotenv.config();
@@ -403,24 +404,54 @@ async function handleMessage(message) {
       console.warn('[Phone] Error obteniendo contacto, usando fallback:', clientPhone);
     }
 
-    // Comando de administrador: resumen de ventas del día bajo demanda (útil para pruebas)
-    if (messageBody.toLowerCase() === '!resumen' || messageBody.toLowerCase() === '!reporte') {
+    // ── Comandos de administrador (solo el número admin) ──
+    // Si el remitente NO es admin, NO interceptamos: el mensaje sigue al agente como uno normal.
+    if (messageBody.startsWith('!')) {
       const adminJid = await getAdminJid();
       const adminPhone = adminJid.replace('@c.us', '');
       const senderLast9 = clientPhone.replace(/\D/g, '').slice(-9);
-      if (senderLast9 && adminPhone.slice(-9) === senderLast9) {
+      const esAdmin = senderLast9 && adminPhone.slice(-9) === senderLast9;
+
+      if (esAdmin) {
+        const parts = messageBody.trim().split(/\s+/);
+        const cmd = parts[0].toLowerCase();
         try {
-          const report = await buildDailyReport();
-          await client.sendMessage(adminJid, report);
-          console.log('[Resumen] Reporte diario enviado al admin bajo demanda.');
+          if (cmd === '!resumen' || cmd === '!reporte') {
+            await client.sendMessage(adminJid, await buildDailyReport());
+            console.log('[Admin] Resumen diario enviado bajo demanda.');
+
+          } else if (cmd === '!pendientes') {
+            const rows = await listActionableOrders(15);
+            await client.sendMessage(adminJid, formatActionableOrders(rows));
+            console.log(`[Admin] Listado de pedidos por gestionar enviado (${rows.length}).`);
+
+          } else if (cmd === '!estado') {
+            if (parts.length < 3) {
+              await message.reply(`Uso: *!estado <id> <nuevo>*\nEstados: ${ESTADOS_VALIDOS.join(' / ')}`);
+            } else {
+              const res = await updateOrderStatus(parts[1], parts[2]);
+              await message.reply(res.message);
+              if (res.success) console.log(`[Admin] ${res.message.replace(/\*|_/g, '')}`);
+            }
+
+          } else if (cmd === '!ayuda' || cmd === '!comandos') {
+            await message.reply(
+              `🛠️ *Comandos de administrador*\n\n` +
+              `*!resumen* — resumen de ventas del día\n` +
+              `*!pendientes* — pedidos por gestionar\n` +
+              `*!estado <id> <nuevo>* — cambiar estado de un pedido\n` +
+              `   (${ESTADOS_VALIDOS.join(' / ')})`
+            );
+
+          } else {
+            await message.reply(`Comando no reconocido. Escribe *!ayuda* para ver los disponibles.`);
+          }
         } catch (e) {
-          console.error('[Resumen] Error generando el reporte bajo demanda:', e);
-          await message.reply('⚠️ No pude generar el resumen ahora. Revisa el log del bot.');
+          console.error(`[Admin] Error ejecutando '${cmd}':`, e);
+          await message.reply('⚠️ Ocurrió un error ejecutando el comando. Revisa el log del bot.');
         }
-      } else {
-        console.log(`[Resumen] Comando !resumen ignorado: ${clientPhone} no es el administrador.`);
+        return;
       }
-      return;
     }
 
     // Filtrar si está configurado para responder solo a chats nuevos (desconocidos)
