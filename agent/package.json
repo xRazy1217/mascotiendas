@@ -8,7 +8,8 @@
     "start": "node index.js",
     "test": "node tests/stress-test.js",
     "test:unit": "node tests/test-sanitizer.js && node tests/test-price.js",
-    "test:report": "node tests/test-report.js"
+    "test:report": "node tests/test-report.js",
+    "test:health": "node tests/test-health.js"
   },
   "dependencies": {
     "@google/generative-ai": "^0.11.0",

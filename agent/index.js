@@ -5,6 +5,7 @@ import dotenv from 'dotenv';
 import { runAgent, transcribeAudio } from './agent.js';
 import { orderEvents } from './events.js';
 import { buildDailyReport } from './reports.js';
+import { getConfig, setConfig } from './config-store.js';
 import pool from './db.js';
 
 dotenv.config();
@@ -101,6 +102,39 @@ const MAX_HISTORY_LENGTH = 20;
 // Registrar la hora de encendido (en segundos UNIX) para ignorar mensajes antiguos en lote
 const startupTime = Math.floor(Date.now() / 1000);
 
+// ── Monitoreo de salud / uptime del bot ──
+const HEARTBEAT_INTERVAL_MS = 60 * 1000;   // latido cada minuto
+const DOWNTIME_ALERT_MINUTES = 5;          // umbral para considerar que hubo una caída real
+let heartbeatInterval = null;
+let reconnecting = false;
+
+// Latido periódico: deja constancia en la BD de que el bot sigue vivo
+function startHeartbeat() {
+  if (heartbeatInterval) return;
+  heartbeatInterval = setInterval(() => {
+    setConfig('bot_last_heartbeat', Date.now());
+  }, HEARTBEAT_INTERVAL_MS);
+}
+
+// Reconexión automática con backoff tras una desconexión
+function attemptReconnect(attempt = 1) {
+  if (reconnecting) return;
+  reconnecting = true;
+  const delayMs = Math.min(attempt * 15000, 120000); // hasta 2 minutos
+  console.log(`[Salud] Reintentando conexión en ${delayMs / 1000}s (intento ${attempt})...`);
+  setTimeout(async () => {
+    try {
+      await client.initialize();
+      reconnecting = false;
+      console.log('[Salud] Reinicialización solicitada con éxito.');
+    } catch (e) {
+      reconnecting = false;
+      console.error(`[Salud] Falló el reintento ${attempt}:`, e.message);
+      attemptReconnect(attempt + 1);
+    }
+  }, delayMs);
+}
+
 console.log('🤖 Iniciando Mascotiendas Bot...');
 
 // Configurar cliente de WhatsApp con persistencia de sesión local y uso del ejecutable local de Chrome
@@ -146,8 +180,11 @@ client.on('authenticated', () => {
 });
 
 // Evento si falla la autenticación
-client.on('auth_failure', (msg) => {
+client.on('auth_failure', async (msg) => {
   console.error('❌ Error de autenticación:', msg);
+  // Persistir el estado: una falla de auth suele requerir re-escanear el QR (no se puede avisar por WhatsApp)
+  await setConfig('bot_status', 'auth_failure');
+  await setConfig('bot_auth_failure_at', Date.now());
 });
 
 // Mostrar código QR en la terminal para escanear
@@ -157,13 +194,35 @@ client.on('qr', (qr) => {
 });
 
 // Confirmación de sesión iniciada con éxito
-client.on('ready', () => {
+client.on('ready', async () => {
   console.log('\n✅ ¡Mascotiendas Bot está conectado y listo para recibir mensajes!');
+  reconnecting = false;
   if (landingBypassInterval) {
     clearInterval(landingBypassInterval);
     landingBypassInterval = null;
     console.log('[Puppeteer] Bot listo. Intervalo de bypass de landing page detenido.');
   }
+
+  // Detectar si el bot estuvo caído comparando con el último latido registrado
+  try {
+    const last = await getConfig('bot_last_heartbeat');
+    if (last) {
+      const gapMin = Math.round((Date.now() - Number(last)) / 60000);
+      if (gapMin >= DOWNTIME_ALERT_MINUTES) {
+        const adminJid = await getAdminJid();
+        await client.sendMessage(
+          adminJid,
+          `⚠️ *Alerta de Bot Mascotiendas*\n\nEstuve sin conexión aproximadamente *${gapMin} min* y acabo de reconectarme. Revisa si quedaron mensajes sin responder durante ese período.`
+        );
+        console.warn(`[Salud] Bot reconectado tras ~${gapMin} min de caída. Administrador notificado.`);
+      }
+    }
+  } catch (e) {
+    console.error('[Salud] Error en el chequeo de downtime al reconectar:', e);
+  }
+
+  await setConfig('bot_status', 'online');
+  startHeartbeat();
 });
 
 // Diagnóstico de creación de mensajes
@@ -615,9 +674,17 @@ El cliente ha solicitado la anulación de este pedido directamente desde el chat
   }
 });
 
-// Manejo de desconexión
-client.on('disconnected', (reason) => {
-  console.log('⚠️ El bot se desconectó de WhatsApp:', reason);
+// Manejo de desconexión: registrar estado, detener el latido e intentar reconectar
+client.on('disconnected', async (reason) => {
+  console.error('⚠️ El bot se desconectó de WhatsApp:', reason);
+  if (heartbeatInterval) {
+    clearInterval(heartbeatInterval);
+    heartbeatInterval = null;
+  }
+  await setConfig('bot_status', 'offline');
+  await setConfig('bot_offline_since', Date.now());
+  // Nota: el último 'bot_last_heartbeat' queda como marca de la caída; al volver 'ready' se calcula el downtime.
+  attemptReconnect();
 });
 
 // Captura periódica de pantalla para diagnóstico visual y bypass de landing page
