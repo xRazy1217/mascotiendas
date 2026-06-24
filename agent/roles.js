@@ -14,12 +14,34 @@ const ADMIN_FALLBACK = '56920571475';
 
 const toDigits = (v) => String(v || '').replace(/\D/g, '');
 
+// Caché en memoria de los números por rol: resolveRole se llama en cada mensaje entrante,
+// así evitamos 3 lecturas a la BD por mensaje. Se invalida al cambiar un número.
+let _numCache = null;
+let _numCacheAt = 0;
+const NUM_CACHE_TTL_MS = 60 * 1000;
+
+/** Invalida la caché de números por rol (tras un cambio de configuración). */
+export function invalidateRoleCache() {
+  _numCache = null;
+}
+
+async function allRoleNumbers() {
+  if (_numCache && Date.now() - _numCacheAt < NUM_CACHE_TTL_MS) return _numCache;
+  const m = {};
+  for (const r of ROLES) {
+    const d = toDigits(await getConfig(CONFIG_KEY[r]));
+    m[r] = d || (r === 'admin' ? ADMIN_FALLBACK : null);
+  }
+  _numCache = m;
+  _numCacheAt = Date.now();
+  return m;
+}
+
 /** Devuelve el número (solo dígitos) configurado para un rol, o null si no hay. */
 export async function getRoleNumber(role) {
   if (!CONFIG_KEY[role]) return null;
-  const d = toDigits(await getConfig(CONFIG_KEY[role]));
-  if (d) return d;
-  return role === 'admin' ? ADMIN_FALLBACK : null;
+  const m = await allRoleNumbers();
+  return m[role] || null;
 }
 
 /** Devuelve el JID de WhatsApp (569...@c.us) de un rol, o null. */
@@ -38,6 +60,7 @@ export async function setRoleNumber(role, numero) {
     return { success: false, message: 'Número inválido. Usa formato 569XXXXXXXX.' };
   }
   await setConfig(CONFIG_KEY[role], d);
+  invalidateRoleCache();
   return { success: true, message: `✅ Número de *${role}* actualizado a +${d}.`, role, numero: d };
 }
 

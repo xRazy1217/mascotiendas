@@ -9,6 +9,7 @@ import { getConfig, setConfig } from './config-store.js';
 import { updateOrderStatus, listActionableOrders, formatActionableOrders, getOrderSummary, customerStatusMessage, ESTADOS_VALIDOS } from './orders-admin.js';
 import { recipientsForEvent, listRoleConfig, setRoleNumber, resolveRole, ROLES } from './roles.js';
 import { canRunCommand, canSetEstado, isAffirmation, isNegation, parseStaffIntent } from './staff.js';
+import { ensureHistoryTable, loadHistory, saveHistory, deleteHistory, purgeOldHistory } from './history-store.js';
 import pool from './db.js';
 
 // Envía un mensaje a todos los destinatarios que correspondan a un tipo de evento (ruteo por rol).
@@ -522,14 +523,15 @@ async function handleMessage(message) {
     // Comando especial para reiniciar la conversación
     if (messageBody.toLowerCase() === '!reiniciar' || messageBody.toLowerCase() === '!limpiar') {
       chatHistories.delete(chatId);
+      await deleteHistory(chatId);
       await message.reply('🔄 *Historial de conversación reiniciado.* ¿En qué puedo ayudarte hoy?');
       console.log(`[Historial Reiniciado] Para el chat: ${chatId}`);
       return;
     }
 
-    // Inicializar historial si no existe
+    // Inicializar historial: en memoria, o cargándolo de la BD si el bot se reinició
     if (!chatHistories.has(chatId)) {
-      chatHistories.set(chatId, []);
+      chatHistories.set(chatId, await loadHistory(chatId));
     }
 
     const history = chatHistories.get(chatId);
@@ -686,6 +688,7 @@ El bot quedó en silencio en este chat por ${pauseHours}h para que lo atiendas. 
     updatedHistory = updatedHistory.filter(m => m && m.parts && m.parts.length > 0);
 
     chatHistories.set(chatId, updatedHistory);
+    await saveHistory(chatId, updatedHistory); // persistir para sobrevivir reinicios
     console.log(`[Respuesta Enviada] Hacia: ${chatId} | Historial actualizado (${updatedHistory.length} entradas)`);
 
   } catch (error) {
@@ -897,13 +900,18 @@ setInterval(() => {
       purgados++;
     }
   }
-  // Limpiar derivaciones vencidas que ya no se reactivaron por un mensaje del cliente
+  // Limpiar derivaciones vencidas y confirmaciones de staff caducadas
   for (const [chatId, until] of escalatedChats.entries()) {
     if (now >= until) escalatedChats.delete(chatId);
+  }
+  for (const [chatId, p] of pendingStaffActions.entries()) {
+    if (now >= p.expiresAt) pendingStaffActions.delete(chatId);
   }
   if (purgados > 0) {
     console.log(`[Limpieza] Estado en memoria purgado de ${purgados} chat(s) inactivo(s). Activos: ${chatLastSeen.size}`);
   }
+  // Acotar el crecimiento de la tabla de historial (filas sin actividad en 30 días)
+  purgeOldHistory(30).then(n => { if (n > 0) console.log(`[Limpieza] Historiales antiguos purgados de la BD: ${n}.`); });
 }, 30 * 60 * 1000); // cada 30 minutos
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -966,6 +974,11 @@ setInterval(async () => {
     console.error('[Resumen Diario] Error en el scheduler:', err);
   }
 }, 60000);
+
+// Asegurar la tabla de historial persistente antes de empezar a atender
+ensureHistoryTable()
+  .then(() => console.log('[Historial] Tabla bot_historial lista.'))
+  .catch(err => console.error('[Historial] No se pudo asegurar la tabla:', err.message));
 
 // Iniciar conexión
 client.initialize();

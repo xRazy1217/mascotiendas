@@ -1,5 +1,5 @@
 // Prueba del módulo de roles: configuración, resolución y ruteo de notificaciones.
-import { setRoleNumber, resolveRole, recipientsForEvent, getRoleJid, listRoleConfig, ROLES } from '../roles.js';
+import { setRoleNumber, resolveRole, recipientsForEvent, getRoleJid, listRoleConfig, invalidateRoleCache, ROLES } from '../roles.js';
 import pool from '../db.js';
 
 let pass = 0, fail = 0;
@@ -37,6 +37,7 @@ async function main() {
 
   // 7. Fallback a admin cuando el rol destino no está configurado
   await pool.execute("DELETE FROM configuraciones WHERE clave = 'despacho_whatsapp_number'");
+  invalidateRoleCache(); // el DELETE directo no pasa por setRoleNumber
   const r3 = await recipientsForEvent('order_ready_for_dispatch');
   const adminJid = await getRoleJid('admin');
   check(r3.length === 1 && r3[0] === adminJid, 'sin despacho configurado, cae a admin');
