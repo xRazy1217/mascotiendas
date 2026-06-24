@@ -66,6 +66,17 @@ const chatHistories = new Map();
 // Clave: chatId, Valor: { timestamps: Array<number>, isPaused: boolean, pausedUntil: number }
 const rateLimits = new Map();
 
+// Última actividad por chat (ms) para purgar conversaciones inactivas y no fugar memoria
+// en un proceso 24/7. Clave: chatId, Valor: timestamp en ms.
+const chatLastSeen = new Map();
+
+// Serialización por chat: evita condiciones de carrera cuando llegan varios mensajes
+// casi simultáneos del mismo remitente sobre el mismo array de historial.
+const chatLocks = new Map();
+
+// Tiempo de inactividad tras el cual se descarta el estado en memoria de un chat (6 horas)
+const CHAT_IDLE_TTL_MS = 6 * 60 * 60 * 1000;
+
 // Límite de mensajes guardados en el historial para evitar saturar el contexto de la IA
 const MAX_HISTORY_LENGTH = 20;
 
@@ -142,8 +153,19 @@ client.on('message_create', (msg) => {
   console.log(`[message_create] De: ${msg.from} | De Mí: ${msg.id.fromMe} | Texto: "${msg.body}"`);
 });
 
-// Escuchar mensajes entrantes
-client.on('message', async (message) => {
+// Escuchar mensajes entrantes — se serializan por chat para evitar carreras sobre el historial
+client.on('message', (message) => {
+  const chatId = message.from;
+  const prev = chatLocks.get(chatId) || Promise.resolve();
+  const next = prev.then(() => handleMessage(message)).catch(err => {
+    console.error('❌ Error no controlado en handleMessage:', err);
+  });
+  chatLocks.set(chatId, next);
+  // Liberar la referencia del lock cuando esta cadena termina y no se encoló otra encima
+  next.finally(() => { if (chatLocks.get(chatId) === next) chatLocks.delete(chatId); });
+});
+
+async function handleMessage(message) {
   try {
     const age = Math.floor(Date.now() / 1000) - message.timestamp;
     // Ignorar mensajes antiguos (recibidos hace más de 10 minutos)
@@ -160,9 +182,12 @@ client.on('message', async (message) => {
     }
 
     const chat = await message.getChat();
-    
+
     const chatId = message.from;
-    
+
+    // Marcar actividad para la purga periódica de estado en memoria
+    chatLastSeen.set(chatId, Date.now());
+
     // Ignorar mensajes de grupos y difusiones de estado, solo responder en chats individuales privados
     if (chat.isGroup || chatId === 'status@broadcast' || chat.id._serialized === 'status@broadcast') {
       console.log(`[Mensaje Ignorado] De: ${chatId} | Razón: Grupo o Difusión`);
@@ -390,7 +415,7 @@ client.on('message', async (message) => {
       console.error('Error al intentar enviar mensaje de error de respaldo:', replyError);
     }
   }
-});
+}
 
 // Escuchar evento de creación de pedidos para notificar a la central
 orderEvents.on('orderCreated', async (order) => {
@@ -571,13 +596,30 @@ landingBypassInterval = setInterval(async () => {
       console.error('[Puppeteer] Error al intentar evadir landing page:', err);
     }
     try {
+      // Captura local para diagnóstico durante la fase de carga/QR (se detiene en 'ready')
       await client.pupPage.screenshot({ path: './whatsapp-debug.png' });
-      await client.pupPage.screenshot({ path: 'C:\\Users\\obal_\\.gemini\\antigravity\\brain\\f745f6fe-1b16-451e-aa4b-006446409b9a\\whatsapp-debug.png' });
     } catch (e) {
       // Ignorar si la página aún no está lista
     }
   }
 }, 10000);
+
+// Purga periódica del estado en memoria de chats inactivos para no fugar memoria (proceso 24/7)
+setInterval(() => {
+  const now = Date.now();
+  let purgados = 0;
+  for (const [chatId, lastSeen] of chatLastSeen.entries()) {
+    if (now - lastSeen > CHAT_IDLE_TTL_MS) {
+      chatHistories.delete(chatId);
+      rateLimits.delete(chatId);
+      chatLastSeen.delete(chatId);
+      purgados++;
+    }
+  }
+  if (purgados > 0) {
+    console.log(`[Limpieza] Estado en memoria purgado de ${purgados} chat(s) inactivo(s). Activos: ${chatLastSeen.size}`);
+  }
+}, 30 * 60 * 1000); // cada 30 minutos
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Resumen diario automático de ventas al administrador
