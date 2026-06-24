@@ -169,6 +169,46 @@ Configurar los roles desde WhatsApp (admin): `!setrol ventas 569XXXXXXXX` · `!s
 
 ---
 
+## 🔧 Puesta en marcha (primera vez)
+
+### Requisitos
+- **Node.js 18+**.
+- **WAMP con MariaDB** activo en el puerto `3308`, con la base `mascotiendas` importada.
+- **Google Chrome** instalado en la ruta del sistema (ver `executablePath` en [index.js](index.js); por defecto `C:\Program Files\Google\Chrome\Application\chrome.exe`).
+- Un **número de WhatsApp dedicado** para el bot (en un teléfono aparte).
+
+### Pasos
+1. **Instalar dependencias** (dentro de `agent/`):
+   ```bash
+   npm install
+   ```
+2. **Crear el archivo `.env`** en `agent/` con tus credenciales:
+   ```env
+   GEMINI_API_KEY=tu_api_key_de_gemini
+   DB_HOST=127.0.0.1
+   DB_PORT=3308
+   DB_USER=root
+   DB_PASS=
+   DB_NAME=mascotiendas
+   ```
+3. **Verificar que MariaDB esté arriba** (WAMP en verde) — sin BD el bot no parte.
+4. **Primer arranque** en consola:
+   ```bash
+   node index.js
+   ```
+   Aparecerá un **código QR** en la terminal. Escanéalo desde el WhatsApp del bot: *Ajustes → Dispositivos vinculados → Vincular un dispositivo*. La sesión queda guardada en `.wwebjs_auth/`, así que **los siguientes arranques no piden QR**.
+5. Esperar el mensaje `✅ ¡Mascotiendas Bot está conectado y listo...`.
+6. **Configurar los números de rol** desde el WhatsApp del administrador:
+   ```
+   !setrol ventas 569XXXXXXXX
+   !setrol despacho 569YYYYYYYY
+   ```
+   (El número del admin se toma de la clave `admin_whatsapp_number`; mientras ventas/despacho no estén configurados, todos los avisos caen al admin.)
+
+> La tabla `bot_historial` se crea sola al arrancar. Las demás tablas (`pedidos`, `configuraciones`, etc.) son del sitio web y deben existir previamente.
+
+---
+
 ## 🚀 Operación
 
 ### Iniciar (consola, ver output en vivo)
