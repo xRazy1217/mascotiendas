@@ -40,6 +40,12 @@ REGLAS ABSOLUTAS DE TONO HUMANO Y CONVERSIÓN COMERCIAL:
 17. **Bienestar del Animal por Sobre la Venta**: Siempre prioriza el bienestar de la mascota antes que cerrar una venta. Si un producto no es lo más adecuado para esa mascota, dilo con honestidad y ofrece la mejor alternativa real, aunque sea más económica. La confianza vende más que la presión.
 18. **Nunca Respondas Vacío**: Tu respuesta final SIEMPRE debe contener texto para el cliente. Está prohibido terminar tu turno con un mensaje vacío o en blanco. Si la consulta es muy general o te falta un dato para recomendar (ej: "tienen comida para perro?"), no te quedes callado: haz UNA pregunta corta de aclaración que avance la venta (ej: "¿Para perro de qué edad y tamaño? Así te recomiendo el ideal 🐾"). Si ya tienes resultados de una herramienta, resúmelos en tu oración breve. Jamás dejes al cliente sin respuesta.
 
+DERIVACIÓN A UN EJECUTIVO HUMANO:
+- Llama a 'escalateToHuman' (con el teléfono del cliente, un motivo breve y un resumen del caso) SOLO en estos casos: (a) reclamos o problemas con un pedido (producto dañado, no llegó, cobro incorrecto); (b) solicitudes que requieren acceso a datos de cuenta que no puedes consultar; (c) cuando el cliente pide explícitamente hablar con una persona o ejecutivo.
+- NO la uses para consultas normales de productos, stock, precios, despacho, agendamiento o anulaciones: esas las resuelves tú con tus herramientas.
+- Tras derivar, despídete en una sola oración avisando que un ejecutivo lo contactará en breve (ej: "Listo, derivé tu caso a un ejecutivo del equipo que te contactará al tiro 🐾").
+- Ojo: los temas de salud de la mascota NO van a un ejecutivo, van al VETERINARIO (regla #16).
+
 INTEGRACIÓN E HISTORIAL DE PEDIDOS:
 - Tienes acceso a la herramienta 'getClientOrders' para consultar el historial de pedidos de un cliente. 
 - El número de teléfono de WhatsApp del cliente con el que estás chateando se te entregará en el contexto. Si el cliente pregunta "¿cómo va mi pedido?", "¿cuándo llega?", "¿qué he comprado antes?" o similar, debes ejecutar 'getClientOrders' de inmediato en la primera vuelta del ciclo, sin pedirle que te dé su número (ya lo sabes por el contexto) y responderle amablemente indicando el estado de sus pedidos recientes (ej: "Tu saco de Dockennedy de $41.900 está en estado 'preparando' y se entrega hoy...").
@@ -196,6 +202,19 @@ const toolsConfig = [
           },
           required: ['clientPhone']
         }
+      },
+      {
+        name: 'escalateToHuman',
+        description: 'Deriva la conversación a un ejecutivo humano. Úsala SOLO para reclamos o problemas con un pedido, solicitudes que requieren acceso a datos de cuenta, o cuando el cliente pide explícitamente hablar con una persona. No la uses para consultas normales de productos, precios o despacho.',
+        parameters: {
+          type: 'OBJECT',
+          properties: {
+            clientPhone: { type: 'STRING', description: 'Número de teléfono del cliente (remitente de WhatsApp)' },
+            motivo: { type: 'STRING', description: 'Motivo breve de la derivación (ej: "reclamo por pedido dañado", "pide hablar con un ejecutivo")' },
+            resumenContexto: { type: 'STRING', description: 'Resumen corto del caso para que el ejecutivo humano tenga contexto al retomar' }
+          },
+          required: ['clientPhone', 'motivo']
+        }
       }
     ]
   }
@@ -210,7 +229,8 @@ const toolsMapping = {
   getClientOrders: (args) => tools.getClientOrders(args.clientPhone),
   updateLastOrderDeliveryDetails: (args) => tools.updateLastOrderDeliveryDetails(args.clientPhone, args.fechaDespacho, args.horaDespacho, args.notas),
   createOrder: (args) => tools.createOrder(args),
-  cancelClientOrder: (args) => tools.cancelClientOrder(args.clientPhone, args.orderId ? Number(args.orderId) : undefined)
+  cancelClientOrder: (args) => tools.cancelClientOrder(args.clientPhone, args.orderId ? Number(args.orderId) : undefined),
+  escalateToHuman: (args) => tools.escalateToHuman(args.clientPhone, args.motivo, args.resumenContexto)
 };
 
 /**
@@ -298,6 +318,7 @@ export async function runAgent(history = [], userMessage, clientPhone = '') {
 
   let loopCount = 0;
   const maxLoops = 6; // Límite para evitar loops infinitos de herramientas
+  let escalation = null; // Se llena si el agente invoca escalateToHuman
 
   while (loopCount < maxLoops) {
     loopCount++;
@@ -344,6 +365,11 @@ export async function runAgent(history = [], userMessage, clientPhone = '') {
           toolResult = { error: error.message };
         }
 
+        // Si se derivó a un humano, lo retenemos para que index.js notifique al admin y pause el chat
+        if (name === 'escalateToHuman' && toolResult && toolResult.escalated) {
+          escalation = toolResult;
+        }
+
         functionResponseParts.push({
           functionResponse: {
             name: name,
@@ -382,10 +408,11 @@ export async function runAgent(history = [], userMessage, clientPhone = '') {
       parts: [{ text: finalAnswer }]
     });
     
-    // Retornar la respuesta final y el historial actualizado
+    // Retornar la respuesta final y el historial actualizado (más el escalamiento si lo hubo)
     return {
       answer: finalAnswer,
-      history: messages
+      history: messages,
+      escalation
     };
   }
 

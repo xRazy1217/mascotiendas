@@ -57,6 +57,20 @@ async function getOnlyRespondToUnknown() {
   return true; // Fallback seguro para evitar spam a contactos personales si hay error
 }
 
+// Helper para obtener cuántas horas se silencia el bot tras derivar un chat a un humano (default 3)
+async function getHandoffPauseHours() {
+  try {
+    const [rows] = await pool.execute("SELECT valor FROM configuraciones WHERE clave = 'bot_handoff_pause_hours'");
+    if (rows.length > 0 && rows[0].valor) {
+      const h = parseInt(rows[0].valor, 10);
+      if (Number.isFinite(h) && h > 0) return h;
+    }
+  } catch (err) {
+    console.error('Error al consultar bot_handoff_pause_hours:', err);
+  }
+  return 3;
+}
+
 
 // Mapa en memoria para almacenar el historial de chats de cada contacto
 // Clave: chatId (remitente), Valor: Array de mensajes en formato de Gemini [{ role, parts }]
@@ -73,6 +87,10 @@ const chatLastSeen = new Map();
 // Serialización por chat: evita condiciones de carrera cuando llegan varios mensajes
 // casi simultáneos del mismo remitente sobre el mismo array de historial.
 const chatLocks = new Map();
+
+// Chats derivados a un ejecutivo humano: el bot se mantiene en silencio hasta este timestamp (ms)
+// para que la persona tome el control sin interferencia. Clave: chatId, Valor: until (ms).
+const escalatedChats = new Map();
 
 // Tiempo de inactividad tras el cual se descarta el estado en memoria de un chat (6 horas)
 const CHAT_IDLE_TTL_MS = 6 * 60 * 60 * 1000;
@@ -187,6 +205,16 @@ async function handleMessage(message) {
 
     // Marcar actividad para la purga periódica de estado en memoria
     chatLastSeen.set(chatId, Date.now());
+
+    // Si el chat fue derivado a un ejecutivo humano, el bot permanece en silencio hasta que venza la pausa
+    if (escalatedChats.has(chatId)) {
+      if (Date.now() < escalatedChats.get(chatId)) {
+        console.log(`[Handoff] Mensaje ignorado de ${chatId}: chat derivado a ejecutivo humano (bot en silencio).`);
+        return;
+      }
+      escalatedChats.delete(chatId); // Venció la pausa; el bot vuelve a atender
+      console.log(`[Handoff] Pausa de derivación finalizada para ${chatId}. El bot retoma la atención.`);
+    }
 
     // Ignorar mensajes de grupos y difusiones de estado, solo responder en chats individuales privados
     if (chat.isGroup || chatId === 'status@broadcast' || chat.id._serialized === 'status@broadcast') {
@@ -386,6 +414,34 @@ async function handleMessage(message) {
 
     // Enviar respuesta al cliente
     await message.reply(safeAnswer);
+
+    // Si el agente derivó el caso a un humano: notificar al admin con contexto y silenciar el bot
+    if (agentResponse.escalation) {
+      try {
+        const pauseHours = await getHandoffPauseHours();
+        escalatedChats.set(chatId, Date.now() + pauseHours * 60 * 60 * 1000);
+
+        const adminJid = await getAdminJid();
+        const rawPhone = String(clientPhone).replace(/\D/g, '');
+        const cleanPhone = rawPhone.startsWith('56') && rawPhone.length >= 11
+          ? rawPhone
+          : rawPhone.length === 9 ? `56${rawPhone}` : rawPhone;
+        const esc = agentResponse.escalation;
+
+        const aviso = `🙋 *DERIVACIÓN A EJECUTIVO* 🙋
+
+👤 *Cliente:* ${clientPhone ? '+' + cleanPhone : chatId}
+📌 *Motivo:* ${esc.motivo || 'No especificado'}
+📝 *Contexto:* ${esc.resumenContexto || 'Sin resumen'}
+
+El bot quedó en silencio en este chat por ${pauseHours}h para que lo atiendas. Escríbele directamente al cliente.`;
+
+        await client.sendMessage(adminJid, aviso);
+        console.log(`[Handoff] Chat ${chatId} derivado a humano. Bot en silencio ${pauseHours}h. Admin notificado.`);
+      } catch (escErr) {
+        console.error('[Handoff] Error al notificar la derivación al administrador:', escErr);
+      }
+    }
 
     // Actualizar el historial en memoria con el nuevo flujo retornado por el agente
     let updatedHistory = agentResponse.history;
@@ -615,6 +671,10 @@ setInterval(() => {
       chatLastSeen.delete(chatId);
       purgados++;
     }
+  }
+  // Limpiar derivaciones vencidas que ya no se reactivaron por un mensaje del cliente
+  for (const [chatId, until] of escalatedChats.entries()) {
+    if (now >= until) escalatedChats.delete(chatId);
   }
   if (purgados > 0) {
     console.log(`[Limpieza] Estado en memoria purgado de ${purgados} chat(s) inactivo(s). Activos: ${chatLastSeen.size}`);

@@ -577,6 +577,27 @@ export async function cancelClientOrder(clientPhone, orderId) {
   }
 }
 
+/**
+ * Marca la conversación para escalarla a un ejecutivo humano. No resuelve nada por sí misma:
+ * la lógica de notificar al administrador y silenciar al bot vive en index.js, que detecta
+ * esta llamada en el resultado del agente. Aquí solo se valida y normaliza el motivo.
+ * @param {string} clientPhone - Teléfono del cliente (remitente)
+ * @param {string} motivo - Motivo breve de la derivación (reclamo, datos de cuenta, etc.)
+ * @param {string} [resumenContexto] - Resumen corto del caso para que el humano tenga contexto
+ */
+export async function escalateToHuman(clientPhone, motivo, resumenContexto = '') {
+  const motivoLimpio = String(motivo || 'Solicitud de atención humana').trim().slice(0, 200);
+  const resumen = String(resumenContexto || '').trim().slice(0, 400);
+  console.log(`[Escalamiento] Cliente ${clientPhone} -> humano. Motivo: ${motivoLimpio}`);
+  return {
+    success: true,
+    escalated: true,
+    motivo: motivoLimpio,
+    resumenContexto: resumen,
+    message: 'Caso derivado a un ejecutivo humano.'
+  };
+}
+
 
 
 

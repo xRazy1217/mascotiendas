@@ -131,6 +131,21 @@ async function main() {
       { ok: !!answer.trim(), msg: 'responde (no vacío)' },
     ]);
 
+  // 11. Reclamo serio: debe derivar a un ejecutivo humano
+  await scenario('11. Reclamo (deriva a humano)', '56949865594',
+    ['me llego el saco roto y todo botado, esto es un desastre, exijo un reembolso ya'],
+    ({ tools, answer }) => [
+      { ok: tools.includes('escalateToHuman'), msg: 'llama escalateToHuman' },
+      { ok: !!answer.trim(), msg: 'avisa al cliente (no vacío)' },
+    ]);
+
+  // 12. Consulta normal: NO debe derivar a humano
+  await scenario('12. Consulta normal (NO deriva)', '56912121212',
+    ['tienen arena para gato?'],
+    ({ tools }) => [
+      { ok: !tools.includes('escalateToHuman'), msg: 'NO escala una consulta normal' },
+    ]);
+
   // ── Reporte ──
   console.log(`${C.c}──────── TRANSCRIPCIONES ────────${C.x}`);
   for (const res of results) {
