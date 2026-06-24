@@ -50,6 +50,29 @@ export async function updateOrderStatus(orderId, nuevoEstado) {
 }
 
 /**
+ * Construye el mensaje que se le envía al CLIENTE cuando su pedido cambia de estado.
+ * Devuelve null para estados que no ameritan avisar al cliente.
+ * @param {object} order - Fila del pedido (con id y nombre_cliente)
+ * @param {string} estado
+ * @returns {string|null}
+ */
+export function customerStatusMessage(order, estado) {
+  const id = order && order.id;
+  const nombre = String((order && order.nombre_cliente) || '').trim().split(/\s+/)[0];
+  const hola = nombre ? `¡Hola, ${nombre}!` : '¡Hola!';
+  switch (estado) {
+    case 'enviado':
+      return `🚚 ${hola} Tu pedido *#${id}* de Mascotiendas ya va en camino. ¡Llega pronto! 🐾`;
+    case 'entregado':
+      return `📦 ${hola} Tu pedido *#${id}* fue entregado. ¡Gracias por tu compra y saludos a tu regalón! 🐾`;
+    case 'cancelado':
+      return `${hola} Tu pedido *#${id}* fue anulado. Si necesitas ayuda o fue un error, escríbenos por aquí. 🐾`;
+    default:
+      return null;
+  }
+}
+
+/**
  * Devuelve el detalle de un pedido para armar avisos (a despacho o al cliente).
  * @param {number} orderId
  * @returns {Promise<object|null>}

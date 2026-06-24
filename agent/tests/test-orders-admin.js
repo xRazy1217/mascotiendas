@@ -1,5 +1,5 @@
 // Prueba de la gestión de estados de pedido por el administrador.
-import { updateOrderStatus, listActionableOrders, formatActionableOrders, ESTADOS_VALIDOS } from '../orders-admin.js';
+import { updateOrderStatus, listActionableOrders, formatActionableOrders, customerStatusMessage, ESTADOS_VALIDOS } from '../orders-admin.js';
 import pool from '../db.js';
 
 let pass = 0, fail = 0;
@@ -54,6 +54,14 @@ async function main() {
 
     // 10. Enum coherente
     check(ESTADOS_VALIDOS.length === 6 && ESTADOS_VALIDOS.includes('enviado'), 'enum de estados coherente');
+
+    // 11. Mensaje al cliente por estado
+    const ord = { id: 99, nombre_cliente: 'Pedro Pérez' };
+    check(customerStatusMessage(ord, 'enviado').includes('#99') && customerStatusMessage(ord, 'enviado').includes('camino'), 'mensaje cliente: enviado');
+    check(customerStatusMessage(ord, 'entregado').includes('entregado'), 'mensaje cliente: entregado');
+    check(customerStatusMessage(ord, 'cancelado').includes('anulado'), 'mensaje cliente: cancelado');
+    check(customerStatusMessage(ord, 'enviado').includes('Pedro'), 'mensaje cliente usa el nombre');
+    check(customerStatusMessage(ord, 'pagado') === null && customerStatusMessage(ord, 'preparando') === null, 'estados internos NO generan aviso al cliente');
 
   } finally {
     await pool.execute('DELETE FROM pedidos WHERE id = ?', [id]);

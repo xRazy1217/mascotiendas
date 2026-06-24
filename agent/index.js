@@ -6,7 +6,7 @@ import { runAgent, transcribeAudio } from './agent.js';
 import { orderEvents } from './events.js';
 import { buildDailyReport } from './reports.js';
 import { getConfig, setConfig } from './config-store.js';
-import { updateOrderStatus, listActionableOrders, formatActionableOrders, getOrderSummary, ESTADOS_VALIDOS } from './orders-admin.js';
+import { updateOrderStatus, listActionableOrders, formatActionableOrders, getOrderSummary, customerStatusMessage, ESTADOS_VALIDOS } from './orders-admin.js';
 import { recipientsForEvent, listRoleConfig, setRoleNumber, resolveRole, ROLES } from './roles.js';
 import { canRunCommand, canSetEstado, isAffirmation, isNegation, parseStaffIntent } from './staff.js';
 import pool from './db.js';
@@ -38,30 +38,66 @@ function staffHelp(role) {
   return lines.join('\n');
 }
 
+// Avisa al CLIENTE de un cambio de estado, verificando antes que el número esté en WhatsApp.
+// Devuelve { sent: boolean, reason?: string } para informar al staff.
+async function notifyCustomer(order, estado) {
+  const text = customerStatusMessage(order, estado);
+  if (!text) return { sent: false, reason: 'estado sin aviso' };
+  const digits = String(order && order.telefono || '').replace(/\D/g, '');
+  if (digits.length < 9) return { sent: false, reason: 'sin teléfono válido' };
+  let numId = null;
+  try {
+    numId = await client.getNumberId(digits);
+  } catch (e) {
+    return { sent: false, reason: 'error verificando WhatsApp' };
+  }
+  if (!numId) return { sent: false, reason: 'el número no está en WhatsApp' };
+  try {
+    await client.sendMessage(numId._serialized, text);
+    return { sent: true };
+  } catch (e) {
+    return { sent: false, reason: 'error al enviar' };
+  }
+}
+
 // Aplica un cambio de estado y dispara las cascadas correspondientes
 async function applyStatusChange(message, orderId, estado, role) {
   const res = await updateOrderStatus(orderId, estado);
-  await message.reply(res.message);
-  if (!res.success) return res;
+  if (!res.success) {
+    await message.reply(res.message);
+    return res;
+  }
   console.log(`[Staff:${role}] ${res.message.replace(/\*|_/g, '')}`);
 
-  // Cascada: al confirmar el pago (transferencia), avisar a despacho que el pedido quedó listo
-  if (estado === 'pagado') {
+  let extra = '';
+  // Necesitamos el detalle del pedido para las cascadas
+  let o = null;
+  if (estado === 'pagado' || ['enviado', 'entregado', 'cancelado'].includes(estado)) {
+    try { o = await getOrderSummary(res.orderId); } catch (_) {}
+  }
+
+  // Cascada 1: al confirmar el pago (transferencia), avisar a despacho que el pedido quedó listo
+  if (estado === 'pagado' && o) {
     try {
-      const o = await getOrderSummary(res.orderId);
-      if (o) {
-        const f = o.fecha_despacho
-          ? (o.fecha_despacho instanceof Date ? o.fecha_despacho.toISOString().slice(0, 10) : String(o.fecha_despacho).slice(0, 10))
-          : 'sin agendar';
-        const aviso = `📦 *PEDIDO LISTO PARA DESPACHAR (#${o.id})*\n\n👤 ${o.nombre_cliente}\n📍 ${o.direccion}, ${o.ciudad}\n📅 ${f} ${o.hora_despacho || ''}\n📝 ${o.notas || 'Sin notas'}\n🛒 ${o.productos || ''}`;
-        await notifyRecipients('order_ready_for_dispatch', aviso);
-        console.log(`[Staff] Pedido #${o.id} avisado a despacho (listo para despachar).`);
-      }
+      const f = o.fecha_despacho
+        ? (o.fecha_despacho instanceof Date ? o.fecha_despacho.toISOString().slice(0, 10) : String(o.fecha_despacho).slice(0, 10))
+        : 'sin agendar';
+      const aviso = `📦 *PEDIDO LISTO PARA DESPACHAR (#${o.id})*\n\n👤 ${o.nombre_cliente}\n📍 ${o.direccion}, ${o.ciudad}\n📅 ${f} ${o.hora_despacho || ''}\n📝 ${o.notas || 'Sin notas'}\n🛒 ${o.productos || ''}`;
+      await notifyRecipients('order_ready_for_dispatch', aviso);
+      extra += '\n📦 Despacho avisado.';
+      console.log(`[Staff] Pedido #${o.id} avisado a despacho (listo para despachar).`);
     } catch (e) {
       console.error('[Staff] Error avisando a despacho:', e);
     }
   }
-  // (Fase C añadirá: enviado/entregado/cancelado -> notificar al cliente)
+
+  // Cascada 2: avisar al CLIENTE en enviado / entregado / cancelado
+  if (['enviado', 'entregado', 'cancelado'].includes(estado) && o) {
+    const r = await notifyCustomer(o, estado);
+    extra += r.sent ? '\n📲 Cliente notificado.' : `\n⚠️ Cliente no notificado (${r.reason}).`;
+  }
+
+  await message.reply(res.message + extra);
   return res;
 }
 
