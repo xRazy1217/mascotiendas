@@ -338,6 +338,81 @@ export async function createOrder(orderData) {
       items = []
     } = orderData;
 
+    // ── Validación server-side de precios y stock ──
+    // NO confiamos en los montos que calcula el modelo (riesgo financiero): recalculamos
+    // cada precio desde la BD, rechazamos productos inactivos o sin stock, y recomputamos totales.
+    if (!Array.isArray(items) || items.length === 0) {
+      await connection.rollback();
+      return { success: false, message: 'El pedido no tiene productos.' };
+    }
+
+    const validatedItems = [];
+    const sinStock = [];
+    const noDisponibles = [];
+
+    for (const item of items) {
+      const pid = Number(item.productoId);
+      const cantidad = Math.max(1, parseInt(item.cantidad) || 1);
+      const [rows] = await connection.execute(
+        'SELECT id, nombre, precio_normal, precio_rebajado, en_stock, activo FROM productos WHERE id = ?',
+        [pid]
+      );
+      if (rows.length === 0 || rows[0].activo !== 1) {
+        noDisponibles.push(item.nombre || `producto #${pid}`);
+        continue;
+      }
+      const prod = rows[0];
+      if (prod.en_stock !== 1) {
+        sinStock.push(prod.nombre);
+        continue;
+      }
+      // Precio real: precio_rebajado solo si es válido y menor al normal; si no, precio_normal
+      const rebaj = prod.precio_rebajado;
+      const precioReal = (rebaj != null && rebaj > 0 && rebaj < prod.precio_normal) ? rebaj : prod.precio_normal;
+      validatedItems.push({
+        productoId: pid,
+        nombre: item.nombre || prod.nombre,
+        precio: precioReal,
+        cantidad,
+        imagenUrl: item.imagenUrl || null
+      });
+    }
+
+    // Si algún producto no está disponible o sin stock, abortamos para que el bot ofrezca alternativas
+    if (noDisponibles.length > 0 || sinStock.length > 0) {
+      await connection.rollback();
+      return {
+        success: false,
+        message: 'No se pudo registrar el pedido: hay productos no disponibles o sin stock.',
+        sinStock,
+        noDisponibles
+      };
+    }
+
+    // Subtotal real a partir de los precios validados
+    const subtotalReal = validatedItems.reduce((s, it) => s + it.precio * it.cantidad, 0);
+
+    // Costo de delivery real desde la zona (si se indicó), no el que mande el modelo
+    let costoDeliveryReal = Math.max(0, parseInt(costoDelivery) || 0);
+    if (zonaDeliveryId) {
+      const [zrows] = await connection.execute(
+        'SELECT costo FROM zonas_delivery WHERE id = ? AND activo = 1',
+        [zonaDeliveryId]
+      );
+      if (zrows.length > 0) costoDeliveryReal = Math.max(0, parseInt(zrows[0].costo) || 0);
+    }
+
+    // Descuento acotado al rango [0, subtotal] para evitar montos arbitrarios
+    const descuentoReal = Math.min(Math.max(0, parseInt(descuento) || 0), subtotalReal);
+
+    // Total recalculado de forma autoritativa
+    const totalReal = subtotalReal + costoDeliveryReal - descuentoReal;
+
+    // Dejar traza si el modelo había enviado montos distintos a los reales
+    if (Number(subtotal) !== subtotalReal || Number(total) !== totalReal) {
+      console.warn(`[createOrder] Montos del LLM corregidos -> subtotal ${subtotal}=>${subtotalReal}, total ${total}=>${totalReal}`);
+    }
+
     // Normalizar el teléfono antes de guardar en la BD
     // contact.number de whatsapp-web.js retorna solo dígitos (ej: '56949865594')
     // Aseguramos formato +56XXXXXXXXX guardando con el + para consistencia
@@ -358,16 +433,16 @@ export async function createOrder(orderData) {
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pendiente', 'flow', ?, ?, ?, ?, ?, ?, NOW())`,
       [
         nombreCliente, emailCliente, normalizedPhone, direccion, ciudad,
-        subtotal, descuento, total, zonaDeliveryId, costoDelivery,
+        subtotalReal, descuentoReal, totalReal, zonaDeliveryId, costoDeliveryReal,
         fechaDespacho, horaDespacho, metodoEntrega, notas
       ]
     );
 
     const pedidoId = result.insertId;
 
-    // 2. Insertar los ítems del pedido
-    for (const item of items) {
-      const { productoId, nombre, precio, cantidad = 1, imagenUrl = null } = item;
+    // 2. Insertar los ítems del pedido (con precios ya validados contra la BD)
+    for (const item of validatedItems) {
+      const { productoId, nombre, precio, cantidad, imagenUrl } = item;
       await connection.execute(
         `INSERT INTO pedido_items (pedido_id, producto_id, nombre, precio, cantidad, imagen_url)
          VALUES (?, ?, ?, ?, ?, ?)`,
@@ -386,16 +461,16 @@ export async function createOrder(orderData) {
         emailCliente,
         direccion,
         ciudad,
-        subtotal,
-        descuento,
-        total,
+        subtotal: subtotalReal,
+        descuento: descuentoReal,
+        total: totalReal,
         metodoEntrega,
         zonaDeliveryId,
-        costoDelivery,
+        costoDelivery: costoDeliveryReal,
         fechaDespacho,
         horaDespacho,
         notas,
-        items
+        items: validatedItems
       });
     } catch (e) {
       console.error('Error al emitir evento orderCreated:', e);
@@ -403,9 +478,12 @@ export async function createOrder(orderData) {
 
     return {
       success: true,
-      message: `Pedido #${pedidoId} creado y registrado con éxito.`,
+      message: `Pedido #${pedidoId} creado y registrado con éxito. Total validado: $${totalReal.toLocaleString('es-CL')}.`,
       pedidoId,
-      total
+      subtotal: subtotalReal,
+      costoDelivery: costoDeliveryReal,
+      descuento: descuentoReal,
+      total: totalReal
     };
   } catch (error) {
     await connection.rollback();
@@ -497,6 +575,27 @@ export async function cancelClientOrder(clientPhone, orderId) {
     console.error('Error en cancelClientOrder:', error);
     throw new Error('No se pudo anular el pedido en la base de datos.');
   }
+}
+
+/**
+ * Marca la conversación para escalarla a un ejecutivo humano. No resuelve nada por sí misma:
+ * la lógica de notificar al administrador y silenciar al bot vive en index.js, que detecta
+ * esta llamada en el resultado del agente. Aquí solo se valida y normaliza el motivo.
+ * @param {string} clientPhone - Teléfono del cliente (remitente)
+ * @param {string} motivo - Motivo breve de la derivación (reclamo, datos de cuenta, etc.)
+ * @param {string} [resumenContexto] - Resumen corto del caso para que el humano tenga contexto
+ */
+export async function escalateToHuman(clientPhone, motivo, resumenContexto = '') {
+  const motivoLimpio = String(motivo || 'Solicitud de atención humana').trim().slice(0, 200);
+  const resumen = String(resumenContexto || '').trim().slice(0, 400);
+  console.log(`[Escalamiento] Cliente ${clientPhone} -> humano. Motivo: ${motivoLimpio}`);
+  return {
+    success: true,
+    escalated: true,
+    motivo: motivoLimpio,
+    resumenContexto: resumen,
+    message: 'Caso derivado a un ejecutivo humano.'
+  };
 }
 
 
