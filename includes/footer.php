@@ -19,8 +19,8 @@
     <div class="container mx-auto px-4 grid grid-cols-2 md:grid-cols-4 gap-10 text-center md:text-left">
 
       <div class="col-span-2 md:col-span-1">
-        <img src="https://mascotiendas.cl/wp-content/uploads/2023/07/cropped-mascotiendas-cl-comida-para-perros-gatos-farmacia-peluqueria-tienda-mascotas-veterinaria-la-serena-coquimbo-scaled-1-1024x542.webp"
-             alt="Mascotiendas" class="h-12 w-auto object-contain mb-3">
+        <img src="<?= $base_path ?>/assets/logo.webp"
+             alt="Mascotiendas" class="h-12 w-auto object-contain mb-3" loading="lazy" width="200" height="75">
         <p class="text-slate-200 text-xs leading-relaxed italic mb-3">Líderes en nutrición regional. La Serena y Coquimbo desde 2015.</p>
         <p class="text-xs font-bold text-slate-100" x-text="textos.footer_email||'ventas@mascotiendas.cl'"></p>
         <p class="text-xs font-bold text-slate-100 mt-1" x-text="textos.footer_telefono||'+569 5379 3135'"></p>

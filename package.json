@@ -1,5 +1,12 @@
 {
+  "scripts": {
+    "css": "tailwindcss -i ./assets/css/input.css -o ./assets/css/app.min.css --minify",
+    "css:watch": "tailwindcss -i ./assets/css/input.css -o ./assets/css/app.min.css --watch"
+  },
   "dependencies": {
     "puppeteer-core": "^25.0.4"
+  },
+  "devDependencies": {
+    "tailwindcss": "^3.4.19"
   }
 }

@@ -27,7 +27,7 @@ $theme_cream     = $theme_config['theme_color_cream'] ?? '#F9F1E7';
 <link rel="dns-prefetch" href="https://cdnjs.cloudflare.com">
 <title>Admin — Mascotiendas</title>
 <meta name="robots" content="noindex, nofollow">
-<script src="<?= $base_path ?>/assets/vendor/tailwindcss.js"></script>
+<link rel="stylesheet" href="<?= $base_path ?>/assets/css/app.min.css?v=<?= filemtime(dirname(__DIR__) . '/assets/css/app.min.css') ?>">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
 <script>
 window.MT_BASE_PATH = "<?= htmlspecialchars($base_path) ?>";
@@ -39,7 +39,6 @@ window.MT_CSRF_TOKEN = "<?= $_SESSION['csrf_token'] ?? '' ?>";
       url = (window.MT_BASE_PATH || '') + url;
     }
 
-    // Auto-inyectar token CSRF para peticiones de escritura en panel admin
     options = options || {};
     const method = (options.method || 'GET').toUpperCase();
     if (method !== 'GET' && window.MT_CSRF_TOKEN) {
@@ -54,7 +53,6 @@ window.MT_CSRF_TOKEN = "<?= $_SESSION['csrf_token'] ?? '' ?>";
     return originalFetch(url, options);
   };
 })();
-tailwind.config = { theme: { extend: { colors: { 'mt-brown':'<?= $theme_secondary ?>','mt-orange':'<?= $theme_primary ?>','mt-cream':'<?= $theme_cream ?>' } } } }
 </script>
 <style>[x-cloak]{display:none!important}</style>
 </head>

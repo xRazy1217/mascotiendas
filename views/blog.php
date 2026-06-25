@@ -9,7 +9,9 @@
     <template x-for="post in blogPosts" :key="post.id">
       <div @click="abrirPost(post.slug)"
            class="bg-white rounded-[2rem] border border-mt-cream overflow-hidden hover:shadow-lg transition-all cursor-pointer group">
-        <img :src="getProductImage(post.imagen_portada||'https://images.unsplash.com/photo-1548199973-03cce0bbc87b?w=600')"
+        <img :src="getProductImage(post.imagen_portada||'/assets/no-image.png')"
+             :alt="post.titulo"
+             loading="lazy" decoding="async"
              class="w-full h-48 object-cover group-hover:scale-105 transition-transform">
         <div class="p-5">
           <p class="text-xs text-slate-600 font-bold mb-2"
@@ -33,7 +35,8 @@
     </button>
     <template x-if="blogPost && !blogPost.error">
       <article class="bg-white rounded-[2rem] border border-mt-cream overflow-hidden">
-        <img :src="getProductImage(blogPost.imagen_portada||'https://images.unsplash.com/photo-1548199973-03cce0bbc87b?w=800')"
+        <img :src="getProductImage(blogPost.imagen_portada||'/assets/no-image.png')"
+             :alt="blogPost.titulo"
              class="w-full h-64 object-cover">
         <div class="p-8">
           <p class="text-xs text-slate-600 font-bold mb-3"

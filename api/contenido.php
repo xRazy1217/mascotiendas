@@ -116,10 +116,17 @@ function getSitemap(PDO $pdo): void {
     }
 
     // ── Categorías ──
-    $cats = $pdo->query("SELECT id, nombre FROM categorias ORDER BY nombre");
+    $cats = $pdo->query("SELECT id, nombre, slug, imagen_url FROM categorias ORDER BY nombre");
     foreach ($cats->fetchAll() as $c) {
-        $slug = sitemapSlugify($c['nombre']);
-        echo "<url><loc>{$base}/tienda/categoria/{$c['id']}-{$slug}</loc><changefreq>weekly</changefreq><priority>0.7</priority></url>";
+        $slug = $c['slug'] ?: sitemapSlugify($c['nombre']);
+        $imgTag = '';
+        $rawImg = $c['imagen_url'] ?? '';
+        // Solo incluir imagen si es interna (ruta relativa o dominio propio)
+        if ($rawImg && !str_starts_with($rawImg, 'http')) {
+            $imgUrl = htmlspecialchars($base . $rawImg);
+            $imgTag = "<image:image><image:loc>{$imgUrl}</image:loc><image:title>" . htmlspecialchars($c['nombre']) . "</image:title></image:image>";
+        }
+        echo "<url><loc>{$base}/tienda/categoria/{$c['id']}-{$slug}</loc><changefreq>weekly</changefreq><priority>0.7</priority>{$imgTag}</url>";
     }
 
     // ── Productos (con URLs amigables e imágenes) ──
@@ -146,10 +153,10 @@ function getSitemap(PDO $pdo): void {
     foreach ($posts->fetchAll() as $p) {
         $fecha = date('Y-m-d', strtotime($p['actualizado_en']));
         $imgTag = '';
-        if ($p['imagen_portada']) {
-            $imgUrl = str_starts_with($p['imagen_portada'], 'http') ? htmlspecialchars($p['imagen_portada']) : htmlspecialchars($base . $p['imagen_portada']);
+        if ($p['imagen_portada'] && !str_starts_with($p['imagen_portada'], 'http')) {
+            $imgUrl   = htmlspecialchars($base . $p['imagen_portada']);
             $imgTitle = htmlspecialchars($p['titulo']);
-            $imgTag = "<image:image><image:loc>{$imgUrl}</image:loc><image:title>{$imgTitle}</image:title></image:image>";
+            $imgTag   = "<image:image><image:loc>{$imgUrl}</image:loc><image:title>{$imgTitle}</image:title></image:image>";
         }
         echo "<url><loc>{$base}/blog/{$p['slug']}</loc><lastmod>{$fecha}</lastmod><changefreq>monthly</changefreq><priority>0.6</priority>{$imgTag}</url>";
     }

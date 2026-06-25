@@ -207,6 +207,60 @@ if ($p === 'producto' && isset($_GET['id'])) {
             $canonical_path = "/tienda/categoria/{$cat_id}-" . slugify($cat_data['nombre']);
             $breadcrumbs[] = ['name' => 'Tienda', 'url' => "$base_url/tienda"];
             $breadcrumbs[] = ['name' => $cat_data['nombre'], 'url' => $base_url . $canonical_path];
+
+            // ItemList Schema para páginas de categoría
+            $il_stmt = $pdo->prepare("
+                SELECT p.id, p.nombre, p.slug, p.precio_normal, p.precio_rebajado, p.en_stock,
+                       (SELECT url FROM producto_imagenes pi WHERE pi.producto_id = p.id ORDER BY pi.posicion ASC LIMIT 1) AS imagen
+                FROM productos p
+                INNER JOIN producto_categorias pc ON pc.producto_id = p.id
+                WHERE pc.categoria_id = ? AND p.activo = 1
+                ORDER BY p.precio_normal ASC
+                LIMIT 20
+            ");
+            $il_stmt->execute([$cat_id]);
+            $il_prods = $il_stmt->fetchAll();
+            if ($il_prods) {
+                $il_items = [];
+                foreach ($il_prods as $i => $pr) {
+                    $pr_slug = $pr['slug'] ?: slugify($pr['nombre']);
+                    $pr_url  = "$base_url/producto/{$pr['id']}-{$pr_slug}";
+                    $pr_img  = $pr['imagen']
+                        ? (str_starts_with($pr['imagen'], 'http') ? $pr['imagen'] : $base_url . $pr['imagen'])
+                        : "$base_url/assets/no-image.png";
+                    $price   = $pr['precio_rebajado'] > 0 ? $pr['precio_rebajado'] : $pr['precio_normal'];
+                    $avail   = $pr['en_stock'] ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock';
+                    $item_node = [
+                        '@type'  => 'Product',
+                        'name'   => $pr['nombre'],
+                        'url'    => $pr_url,
+                        'image'  => $pr_img,
+                    ];
+                    if ($price > 0) {
+                        $item_node['offers'] = [
+                            '@type'         => 'Offer',
+                            'price'         => (string)(int)$price,
+                            'priceCurrency' => 'CLP',
+                            'availability'  => $avail,
+                            'seller'        => ['@type' => 'Organization', 'name' => 'Mascotiendas'],
+                        ];
+                    }
+                    $il_items[] = [
+                        '@type'    => 'ListItem',
+                        'position' => $i + 1,
+                        'item'     => $item_node,
+                    ];
+                }
+                $schemas[] = [
+                    '@context'       => 'https://schema.org',
+                    '@type'          => 'ItemList',
+                    'name'           => $cat_data['nombre'],
+                    'description'    => $meta_desc,
+                    'url'            => $base_url . $canonical_path,
+                    'numberOfItems'  => count($il_items),
+                    'itemListElement'=> $il_items,
+                ];
+            }
         }
     } else {
         $breadcrumbs[] = ['name' => 'Tienda', 'url' => "$base_url/tienda"];
@@ -218,6 +272,37 @@ if ($p === 'producto' && isset($_GET['id'])) {
     $meta_keys  = "farmacia veterinaria La Serena, antiparasitarios perros, vitaminas gatos, medicamentos mascotas";
     $canonical_path = "/farmacia";
     $breadcrumbs[] = ['name' => 'Farmacia Veterinaria', 'url' => "$base_url/farmacia"];
+    $schemas[] = [
+        '@context' => 'https://schema.org',
+        '@type'    => 'FAQPage',
+        'mainEntity' => [
+            [
+                '@type'          => 'Question',
+                'name'           => '¿Necesito receta médica para comprar antiparasitarios en Mascotiendas?',
+                'acceptedAnswer' => ['@type' => 'Answer', 'text' => 'No. La mayoría de los antiparasitarios (pipetas, tabletas como Simparica, collares y sprays) se venden sin receta. Solo algunos medicamentos de uso exclusivo veterinario requieren prescripción. Si tienes dudas, escríbenos por WhatsApp.'],
+            ],
+            [
+                '@type'          => 'Question',
+                'name'           => '¿Qué marcas de antiparasitarios tienen disponibles?',
+                'acceptedAnswer' => ['@type' => 'Answer', 'text' => 'Contamos con Simparica, Simparica Trio, Frontline, Advantage, NexGard, Drontal, Milbemax y collar Seresto, entre otras marcas reconocidas por veterinarios en Chile.'],
+            ],
+            [
+                '@type'          => 'Question',
+                'name'           => '¿Con qué frecuencia debo desparasitar a mi perro?',
+                'acceptedAnswer' => ['@type' => 'Answer', 'text' => 'Los cachorros se desparasitan cada 15 días hasta los 3 meses y luego mensual. Los perros adultos cada 3 meses como mínimo, o mensual si tienen acceso a exteriores o contacto con otros animales.'],
+            ],
+            [
+                '@type'          => 'Question',
+                'name'           => '¿Hacen delivery de medicamentos para mascotas en La Serena y Coquimbo?',
+                'acceptedAnswer' => ['@type' => 'Answer', 'text' => 'Sí. Hacemos delivery gratis en toda La Serena y Coquimbo para pedidos en nuestra farmacia veterinaria online. Los pedidos se despachan en el mismo día o al día siguiente hábil.'],
+            ],
+            [
+                '@type'          => 'Question',
+                'name'           => '¿Cuánto cuestan los antiparasitarios para perros en Mascotiendas?',
+                'acceptedAnswer' => ['@type' => 'Answer', 'text' => 'Los precios varían según el tipo y el peso del perro. Las pipetas mensuales van desde $8.000 CLP aproximadamente. Puedes revisar los precios actualizados en nuestra sección de farmacia o escribirnos al WhatsApp +569 5379 3135.'],
+            ],
+        ],
+    ];
 
 } elseif ($p === 'blog' && !isset($_GET['slug'])) {
     $meta_title = "Blog de Mascotas | Consejos y Cuidados | Mascotiendas";
@@ -371,17 +456,8 @@ if (count($breadcrumbs) > 1) {
     };
   })();
 </script>
-<script src="<?= $base_path ?>/assets/vendor/tailwindcss.js"></script>
+<link rel="stylesheet" href="<?= $base_path ?>/assets/css/app.min.css?v=<?= filemtime(__DIR__ . '/assets/css/app.min.css') ?>">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
-<script>
-tailwind.config = {
-  theme: { extend: { colors: {
-    'mt-brown': '<?= $theme_secondary ?>',
-    'mt-orange': '<?= $theme_primary ?>',
-    'mt-cream': '<?= $theme_cream ?>'
-  }}}
-}
-</script>
 <style>
 :root {
   --color-primary: <?= $theme_primary ?>;

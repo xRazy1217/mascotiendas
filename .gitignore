@@ -1,6 +1,9 @@
 # Credenciales
 config/db.php
 
+# Tailwind source (el build app.min.css sí va en git)
+assets/css/input.css
+
 # Uploads
 uploads/
 

@@ -15,7 +15,9 @@
         <div class="flex items-center gap-3 p-3 bg-slate-50 rounded-2xl border border-mt-cream">
           <div class="w-14 h-14 overflow-hidden rounded-xl flex-shrink-0 bg-mt-cream">
             <img :src="getProductImage(item.imagen)"
+                 :alt="item.nombre"
                  :style="getImageStyle(item.imagen_crop, 'miniatura')"
+                 loading="lazy" decoding="async"
                  class="w-full h-full object-cover">
           </div>
           <div class="flex-grow min-w-0">

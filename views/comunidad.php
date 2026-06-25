@@ -51,6 +51,7 @@
               <div class="relative mb-4">
                 <div class="overflow-hidden rounded-[2rem] aspect-[16/10] w-full bg-mt-cream relative">
                   <img :src="getProductImage(item.imagen_url)" :alt="item.titulo"
+                       loading="lazy" decoding="async"
                        class="premium-card-img w-full h-full object-cover">
                 </div>
                 <span x-show="item.fecha_evento"

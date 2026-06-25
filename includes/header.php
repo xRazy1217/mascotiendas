@@ -2,8 +2,8 @@
   <nav class="container mx-auto px-4 py-3 flex flex-wrap justify-between items-center gap-3">
 
     <div class="flex items-center gap-2 cursor-pointer" @click="page='home'">
-      <img src="https://mascotiendas.cl/wp-content/uploads/2023/07/cropped-mascotiendas-cl-comida-para-perros-gatos-farmacia-peluqueria-tienda-mascotas-veterinaria-la-serena-coquimbo-scaled-1-1024x542.webp"
-           alt="Mascotiendas" class="h-14 w-auto object-contain">
+      <img src="<?= $base_path ?>/assets/logo.webp"
+           alt="Mascotiendas" class="h-14 w-auto object-contain" width="200" height="75">
     </div>
 
     <div class="flex items-center gap-4">

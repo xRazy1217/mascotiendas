@@ -26,7 +26,7 @@
           <div class="overflow-hidden rounded-[2rem] aspect-[4/3] w-full bg-mt-cream relative">
             <img :src="getProductImage(p.imagen)" :alt="p.nombre"
                  :style="getImageStyle(p.imagen_crop, 'catalogo')"
-                 width="400" height="300"
+                 width="400" height="300" loading="lazy" decoding="async"
                  class="premium-card-img w-full h-full object-cover">
           </div>
           <span x-show="!p.en_stock"

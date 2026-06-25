@@ -38,14 +38,17 @@
           </template>
           <template x-if="!textos.hero_imagen">
             <div class="w-full h-full">
-              <img src="https://images.unsplash.com/photo-1537151608828-ea2b11777ee8?auto=format&fit=crop&w=500&h=500"
-                   class="float-anim absolute inset-0 w-full h-full object-cover transition-opacity duration-700"
+              <img src="/assets/logo.webp"
+                   alt="Mascotiendas — Tienda de mascotas La Serena y Coquimbo"
+                   class="float-anim absolute inset-0 w-full h-full object-contain p-8 transition-opacity duration-700"
                    :class="slide===0?'opacity-100':'opacity-0'">
-              <img src="https://images.unsplash.com/photo-1514888286974-6c03e2ca1dba?auto=format&fit=crop&w=500&h=500"
-                   class="float-anim absolute inset-0 w-full h-full object-cover transition-opacity duration-700"
+              <img src="/assets/logo.webp"
+                   alt="Mascotiendas — Comida para perros y gatos"
+                   class="float-anim absolute inset-0 w-full h-full object-contain p-8 transition-opacity duration-700"
                    :class="slide===1?'opacity-100':'opacity-0'">
-              <img src="https://images.unsplash.com/photo-1425082661705-1834bfd09dca?auto=format&fit=crop&w=500&h=500"
-                   class="float-anim absolute inset-0 w-full h-full object-cover transition-opacity duration-700"
+              <img src="/assets/logo.webp"
+                   alt="Mascotiendas — Farmacia veterinaria"
+                   class="float-anim absolute inset-0 w-full h-full object-contain p-8 transition-opacity duration-700"
                    :class="slide===2?'opacity-100':'opacity-0'">
             </div>
           </template>
@@ -75,8 +78,9 @@
       </div>
       <!-- Imagen -->
       <div class="w-full md:w-72 lg:w-80 flex-shrink-0">
-        <img :src="getProductImage(textos.delivery_imagen||'https://mascotiendas.cl/wp-content/uploads/2025/02/IMG-20250130-WA0049-768x768.jpg')" 
-             alt="Delivery Gratis" 
+        <img :src="getProductImage(textos.delivery_imagen||'/uploads/textos/IMG-20250130-WA0049-768x768.webp')"
+             alt="Delivery Gratis en La Serena y Coquimbo"
+             loading="lazy" decoding="async"
              class="w-full h-full object-cover rounded-[2rem]">
       </div>
     </div>
@@ -113,7 +117,7 @@
       <div @click="page=(cat.slug==='farmacia-mascotas'?'farmacia':'tienda'); filtroCategoria=(cat.slug==='farmacia-mascotas'?'':cat.slug); cargarProductos()"
            class="bg-white p-6 rounded-[2rem] border border-mt-cream hover:shadow-lg transition-all cursor-pointer group flex flex-col items-center">
         <div class="w-24 h-24 rounded-full overflow-hidden mb-3 border-2 border-mt-cream group-hover:border-mt-orange transition-colors">
-          <img :src="getProductImage(cat.imagen_url || 'https://images.unsplash.com/photo-1548199973-03cce0bbc87b?w=400')" :alt="cat.nombre" width="96" height="96" class="w-full h-full object-cover">
+          <img :src="getProductImage(cat.imagen_url || '/assets/no-image.png')" :alt="cat.nombre" width="96" height="96" loading="lazy" decoding="async" class="w-full h-full object-cover">
         </div>
         <span class="font-black text-mt-brown text-sm uppercase tracking-wider group-hover:text-mt-orange transition-colors text-center" x-text="cat.nombre"></span>
       </div>
@@ -136,7 +140,7 @@
           <div class="overflow-hidden rounded-[2rem] aspect-[4/3] w-full bg-mt-cream relative">
             <img :src="getProductImage(p.imagen)" :alt="p.nombre"
                  :style="getImageStyle(p.imagen_crop, 'catalogo')"
-                 width="400" height="300"
+                 width="400" height="300" loading="lazy" decoding="async"
                  class="premium-card-img w-full h-full object-cover">
           </div>
           <span x-show="!p.en_stock"
@@ -177,7 +181,7 @@
       <div @click="page='blog';cargarBlog();abrirPost(post.slug)"
            class="bg-white rounded-[2rem] border border-mt-cream overflow-hidden hover:shadow-lg transition-all cursor-pointer group">
         <div class="h-44 overflow-hidden bg-mt-cream">
-          <img :src="getProductImage(post.imagen_portada||'https://images.unsplash.com/photo-1548199973-03cce0bbc87b?w=400')" :alt="post.titulo" class="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105">
+          <img :src="getProductImage(post.imagen_portada||'/assets/no-image.png')" :alt="post.titulo" loading="lazy" decoding="async" class="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105">
         </div>
         <div class="p-4">
           <p class="text-xs text-slate-600 font-bold mb-1"
